@@ -60,6 +60,16 @@ ADJUSTMENTS = [
                   "unit": "ICTWEB304"},
         "reason": "Jennie Agustin takes the extra wk9 for F2F ICTWEB304 (Shanna is on VOFF).",
     },
+
+    # --- Graham Barber covers the Thursday VOFF Cloud session before Anu takes over ---
+    {
+        "id": "GRAHAM-1", "op": "add_teacher", "teacher": "Graham Barber", "weeks": "10-13",
+        "mode": "VOFF",
+        "match": {"class_contains": "VOFF", "day": "Thursday", "time_start": "9:00",
+                  "unit": "ICTCLD301"},
+        "reason": "Graham Barber covers the Thursday VOFF (Cloud) session wks 10-13, "
+                  "before Anu takes over from wk14. Closes the wks 10-13 gap.",
+    },
 ]
 
 # Combined tutorials that are physically ONE session but listed in both Cert III
