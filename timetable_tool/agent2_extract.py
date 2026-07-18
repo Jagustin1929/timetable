@@ -245,7 +245,11 @@ def main():
                                "hours", "session_type", "units", "delivery", "src")},
                              "teacher_raw": name, "mode": mode or b["delivery"],
                              "wkset": wkset, "wkcount": len(wkset),
-                             "coteachers": [n for n, _ in b["pairs"] if n != name]})
+                             # co-teachers = only those whose weeks OVERLAP this teacher's
+                             # weeks (a sequential hand-over on different weeks is NOT
+                             # co-teaching and must not appear as a co-teacher)
+                             "coteachers": [n for n, _ in b["pairs"]
+                                            if n != name and (b["tweeks"].get(n, b["wkset"]) & wkset)]})
 
     mapping, merges, ambiguous = canonicalize(all_names)
     for s in sessions:
