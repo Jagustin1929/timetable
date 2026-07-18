@@ -2,9 +2,15 @@
 Manual scheduling adjustments (audit trail).
 =============================================
 Each adjustment overrides what a source document says, to resolve real-world
-clashes/combined sessions. Every one is applied AND logged in the workbook's
-"Adjustments applied" audit sheet so a reviewer can see exactly what changed
-and why.
+clashes the source can't express. Every one is applied AND logged in the
+workbook's "Adjustments & audit" sheet so a reviewer can see what changed and why.
+
+NOTE (source corrected): the Cert III F2F/VOF documents were later updated at the
+source to (a) assign the previously-missing teachers, (b) clean the duplicated
+name on the Thursday networking session, and (c) split the Thursday Cloud row into
+ICTCLD301 (Graham, wks 10-14) and ICTICT310 (Anu, wks 14-18). Because of that the
+earlier ANU-1 / ANU-3 / GRAHAM-1 adjustments are no longer needed and were removed
+to avoid double-counting. Only the corrections NOT covered by the source remain.
 
 Matching a session (all provided keys must match):
     class_contains : substring of the class name  (e.g. "Cert IV Programming")
@@ -16,36 +22,23 @@ Operations:
     remove_teacher    - drop a teacher from the matched session
     set_teacher_weeks - restrict/relocate a teacher's weeks on the session
     add_teacher       - add a teacher (optionally only certain weeks / mode)
-    (combined tutorials that appear in both Cert III cohorts are auto-merged
-     separately by the "combined" rule.)
 """
 
 ADJUSTMENTS = [
-    # --- Anu Joshi: move from ICT40120 Thursday to Cert III VOFF Thursday mid-semester ---
-    {
-        "id": "ANU-1", "op": "remove_teacher", "teacher": "Anu Joshi",
-        "match": {"class_contains": "VOFF", "day": "Thursday", "time_start": "9:00",
-                  "unit": "ICTNWK311"},
-        "reason": "Anu teaches Thursday VOFF only from wk14; source listed her on the "
-                  "wks 1-9 networking session (with a duplicated 'Graham Barber') - removed.",
-    },
+    # Anu stops the Thursday ICT40120 session at wk12 so she can pick up the Cert III
+    # VOFF Thursday unit (ICTICT310, wks 14-18) which the source now assigns to her.
+    # (ICT40120 is a separate document and still shows her for all 18 weeks.)
     {
         "id": "ANU-2", "op": "set_teacher_weeks", "teacher": "Anu Joshi", "weeks": "1-12",
         "match": {"class_contains": "Cert IV Programming", "day": "Thursday",
                   "time_start": "9:00", "unit": "ICTPRG302"},
-        "reason": "Anu stops the Thursday ICT40120 session after wk12 (8 Nov 2026). "
-                  "Shaun Stummer continues wks 1-18.",
-    },
-    {
-        "id": "ANU-3", "op": "add_teacher", "teacher": "Anu Joshi", "weeks": "14-18",
-        "mode": "VOFF",
-        "match": {"class_contains": "VOFF", "day": "Thursday", "time_start": "9:00",
-                  "unit": "ICTCLD301"},
-        "reason": "Anu takes the Thursday VOFF (Cloud) session from wk14 (15 Nov 2026). "
-                  "Wks 10-13 remain unassigned - flagged.",
+        "reason": "Anu stops the Thursday ICT40120 session after wk12 (8 Nov 2026); "
+                  "Shaun Stummer continues wks 1-18. Prevents a clash with her Cert III "
+                  "VOFF Thursday unit (wks 14-18).",
     },
 
-    # --- Shanna Roper / Jennie Agustin: Wednesday wk9 web-pages ---
+    # Shanna can't be in two places in wk9 (she moves to the VOFF Wednesday session),
+    # so her F2F ICTWEB304 becomes wks 1-8 and Jennie covers the F2F wk9.
     {
         "id": "WED9-1", "op": "set_teacher_weeks", "teacher": "Shanna Roper", "weeks": "1-8",
         "match": {"class_contains": "F2F", "day": "Wednesday", "time_start": "9:00",
@@ -60,21 +53,11 @@ ADJUSTMENTS = [
                   "unit": "ICTWEB304"},
         "reason": "Jennie Agustin takes the extra wk9 for F2F ICTWEB304 (Shanna is on VOFF).",
     },
-
-    # --- Graham Barber covers the Thursday VOFF Cloud session before Anu takes over ---
-    {
-        "id": "GRAHAM-1", "op": "add_teacher", "teacher": "Graham Barber", "weeks": "10-13",
-        "mode": "VOFF",
-        "match": {"class_contains": "VOFF", "day": "Thursday", "time_start": "9:00",
-                  "unit": "ICTCLD301"},
-        "reason": "Graham Barber covers the Thursday VOFF (Cloud) session wks 10-13, "
-                  "before Anu takes over from wk14. Closes the wks 10-13 gap.",
-    },
 ]
 
 # Combined tutorials that are physically ONE session but listed in both Cert III
-# cohort documents. They are merged (counted once) when: same teacher, day, time,
-# session type; both classes are the Cert III F2F and VOFF; and the activity text
-# contains "combined".
+# cohort documents. Merged (counted once) when: same teacher, day, time, session
+# type; both classes are the Cert III F2F and VOFF; and the activity text says
+# "combined".
 MERGE_COMBINED_CERT3 = True
 COMBINED_LABEL = "Cert III General (F2F+VOFF combined)"
