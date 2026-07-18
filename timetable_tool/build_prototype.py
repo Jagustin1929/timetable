@@ -24,7 +24,13 @@ def read_xlsx(path):
 
 
 def main():
-    sh = read_xlsx(XLSX)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--xlsx", default=XLSX, help="teacher timetables workbook to read")
+    ap.add_argument("--dest", default=DEST, help="output HTML path")
+    ap.add_argument("--semester", default="S2 2026", help="semester label")
+    args = ap.parse_args()
+    sh = read_xlsx(args.xlsx)
     non_teacher = {"Summary", "Reconciliation", "Clashes", "Unassigned sessions",
                    "Adjustments & audit"}
     teacher_names = [n for n in sh if n not in non_teacher]
@@ -52,7 +58,7 @@ def main():
     ]
 
     data = {
-        "semester": "S2 2026",
+        "semester": args.semester,
         "files": files,
         "summary": table("Summary"),
         "reconciliation": {r["Metric"]: r["Value"] for r in table("Reconciliation")},
@@ -62,10 +68,10 @@ def main():
         "teachers": teachers,
     }
 
-    os.makedirs(os.path.dirname(DEST), exist_ok=True)
-    with open(DEST, "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.dirname(args.dest) or ".", exist_ok=True)
+    with open(args.dest, "w", encoding="utf-8") as fh:
         fh.write(HTML.replace("/*__DATA__*/", json.dumps(data)))
-    print("Wrote", os.path.abspath(DEST))
+    print("Wrote", os.path.abspath(args.dest))
     print("Teachers:", len(teachers), "| summary rows:", len(data["summary"]),
           "| unassigned:", len(data["unassigned"]), "| audit:", len(data["audit"]))
 
