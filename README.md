@@ -22,9 +22,11 @@ needs installing (pure Python standard library).
 ## Pipeline
 
 1. **Agent 1 - Normaliser** (`timetable_tool/agent1_normalise.py`)
-   Reads each `.docx` (stdlib only), splits multi-class documents (the combined
-   Diploma becomes 3 classes), and writes a normalised dataset
+   Reads each `.docx` (stdlib only) and writes a normalised dataset
    (`output/normalised_master.csv` + `output/normalised.xlsx`).
+   Classes are **auto-detected** (one Word table = one class; multi-class docs like
+   the combined Diploma split automatically); `CLASS_CONFIG` optionally supplies
+   curated names for known files. Any new document works without configuration.
    *Structural normalisation only - no co-teaching split, renaming, or FTE.*
 
 2. **Agent 2/3 - Consolidate & Extract** (`timetable_tool/agent2_extract.py`)

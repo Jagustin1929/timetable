@@ -46,6 +46,7 @@ CLASS_CONFIG = [
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 UNIT_CODE_RE = re.compile(r"\b([A-Z]{3}[A-Z]{0,4}\d{3})\b")     # e.g. BSBINS516, ICTPRG440, TAEDEL301
 SEM_RE = re.compile(r"Sem(?:ester)?\s*([12])\s*(20\d{2})", re.I)
+QUAL_RE = re.compile(r"\b([A-Z]{2,4}\d{4,6})\b")                # e.g. ICT40120, BSB50520
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,50 @@ def read_body(path):
             for tr in child.findall(W + "tr"):
                 rows.append([cell_lines(tc) for tc in tr.findall(W + "tc")])
             yield ("table", rows, None)
+
+
+# ---------------------------------------------------------------------------
+# Class detection (used when no explicit CLASS_CONFIG entry matches a file)
+# ---------------------------------------------------------------------------
+def read_tables_with_headings(path):
+    """Return [(rows, heading)] where `heading` is the nearest non-empty paragraph
+    preceding each table. One table = one class."""
+    tables, pending = [], ""
+    for kind, payload, _style in read_body(path):
+        if kind == "para":
+            if payload.strip():
+                pending = payload.strip()
+        else:  # table
+            tables.append((payload, pending))
+            pending = ""          # a heading introduces the table right after it
+    return tables
+
+
+def auto_class_defs(fname, tables):
+    """Derive class definitions from the filename + per-table headings when no
+    explicit CLASS_CONFIG entry matches, so any new document 'just works'."""
+    stem = os.path.splitext(fname)[0]
+    qm = QUAL_RE.search(stem.upper())
+    qual = qm.group(1) if qm else ""
+    low = fname.lower()
+    if "f2f" in low or "face to face" in low:
+        mode = "F2F"
+    elif "voff" in low or re.search(r"\bvof\b", low) or "online" in low:
+        mode = "VOFF"
+    elif "evening" in low or "evng" in low:
+        mode = "Evening"
+    else:
+        mode = ""
+    multi = len(tables) > 1
+    defs = []
+    for i, (_rows, heading) in enumerate(tables):
+        name = heading or (qual or stem)
+        if multi and not heading:
+            name = f"{qual or stem} - Class {i + 1}"
+        if mode and mode.lower() not in name.lower():
+            name = f"{name} ({mode})"
+        defs.append({"class": name[:80].strip(), "qual": qual, "delivery": mode})
+    return defs
 
 
 # ---------------------------------------------------------------------------
@@ -169,18 +214,25 @@ def split_units(lines):
     return units, notes, session_type
 
 
-def normalise_file(path, class_defs, target_semester_default="S2 2026"):
-    """Return (records, issues) for one .docx file."""
+def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
+    """Return (records, issues) for one .docx file.
+    If class_defs is None, the classes are auto-detected from the document
+    (one table = one class, named from the preceding heading / qualification)."""
     fname = os.path.basename(path)
     records, issues = [], []
-    tables = [b for b in read_body(path) if b[0] == "table"]
+    tables = read_tables_with_headings(path)      # list of (rows, heading)
 
-    if len(tables) != len(class_defs):
+    if class_defs is None:
+        class_defs = auto_class_defs(fname, tables)
+        issues.append({"file": fname, "level": "INFO",
+                       "msg": f"Auto-detected {len(class_defs)} class(es): "
+                              + "; ".join(d["class"] for d in class_defs)})
+    elif len(tables) != len(class_defs):
         issues.append({"file": fname, "level": "WARN",
                        "msg": f"Expected {len(class_defs)} table(s) for configured classes "
                               f"but found {len(tables)}. Check class config / document structure."})
 
-    for ti, (_, rows, _) in enumerate(tables):
+    for ti, (rows, _heading) in enumerate(tables):
         cdef = class_defs[ti] if ti < len(class_defs) else {
             "class": f"{fname} (table {ti+1})", "qual": "", "delivery": ""}
         header = [" ".join(c).strip() for c in rows[0]] if rows else []
@@ -385,14 +437,10 @@ def main():
         fname = os.path.basename(path)
         low = fname.lower()
         cfg = next((defs for toks, defs in CLASS_CONFIG if all(t in low for t in toks)), None)
-        if cfg is None:
-            all_issues.append({"file": fname, "level": "ERROR",
-                               "msg": "No class configuration matched this filename."})
-            print(f"  !! no class config for {fname}")
-            continue
-        recs, iss = normalise_file(path, cfg)
+        recs, iss = normalise_file(path, cfg)     # cfg=None -> auto-detect classes
         all_records.extend(recs); all_issues.extend(iss)
-        print(f"  {fname}: {len(recs)} session rows, {len(iss)} issue(s)")
+        tag = "" if cfg else "  (auto-detected classes)"
+        print(f"  {fname}: {len(recs)} session rows, {len(iss)} issue(s){tag}")
 
     write_csv(os.path.join(args.out, "normalised_master.csv"), all_records)
     xlsx = write_xlsx(os.path.join(args.out, "normalised.xlsx"), all_records, all_issues)

@@ -220,8 +220,10 @@ Hrs/session, Contact hrs, Class, Delivery, Session type, Units, Co-teachers).
 
 ## 11. Assumptions & limitations
 
-- Class↔file mapping is **configured** (`CLASS_CONFIG`), not inferred — robust for a
-  known, small document set; new documents need a config entry.
+- Class↔file mapping is **auto-detected** (one Word table = one class, named from the
+  preceding heading or the filename's qualification code). `CLASS_CONFIG` optionally
+  overrides this to give curated names for known files, but new documents work with
+  no configuration.
 - Week numbers are the source of truth for coverage; **calendar dates are recorded
   as annotations** (the academic calendar has non-teaching breaks, so week↔date is
   not a fixed arithmetic).

@@ -146,6 +146,7 @@ def results_page(semester, xlsx_name, log):
         dl("workload_summary.csv", "Workload summary (CSV)"),
         dl("normalised.xlsx", "Normalised data (Excel)"),
         dl("normalised_master.csv", "Normalised master (CSV)"),
+        '<a class="dl" href="/zip"><b>&#8595;</b> All files (ZIP)</a>',
     ])
     highlights = "\n".join(l for l in log.splitlines()
                            if re.search(r"CLASHES|NO teacher|adjustments applied|assignments|Distinct teachers|Combined", l, re.I))
@@ -200,6 +201,16 @@ class Handler(BaseHTTPRequestHandler):
                            {"Content-Disposition": f'attachment; filename="{name}"'})
             else:
                 self._send(404, page("<p>File not found.</p>"))
+        elif u.path == "/zip":
+            import io, zipfile
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                for f in sorted(os.listdir(OUT)) if os.path.isdir(OUT) else []:
+                    fp = os.path.join(OUT, f)
+                    if os.path.isfile(fp):
+                        z.write(fp, f)
+            self._send(200, buf.getvalue(), "application/zip",
+                       {"Content-Disposition": 'attachment; filename="teacher_timetables_all.zip"'})
         elif u.path == "/favicon.ico":
             self._send(204, b"")
         else:
