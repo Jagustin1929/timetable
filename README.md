@@ -13,8 +13,9 @@ This starts a small local app and opens it in your browser (or visit the
 `http://127.0.0.1:8000` address it prints). Then just:
 
 1. **Choose** your class-timetable `.docx` files (select several at once).
-2. Set the **semester** (default `S2 2026`) and click **Generate**.
-3. **Download** the teacher-timetables Excel / workload CSV, and view the results inline.
+2. **Pick the semester** from the dropdown (auto-detected from your files) and click **Generate**.
+3. **Download** the teacher timetables as **PDF** or **Excel**, the workload CSV, or
+   **all files as a ZIP** — and view them inline.
 
 Everything runs on your own machine — no files are uploaded anywhere and nothing
 needs installing (pure Python standard library).
@@ -38,12 +39,19 @@ needs installing (pure Python standard library).
 3. **Prototype wireframe** (`timetable_tool/build_prototype.py` -> `prototype/index.html`)
    A single-file clickable prototype populated with the real extracted data.
 
+4. **PDF timetables** (`timetable_tool/make_pdf.py` + `pdf_util.py`)
+   One page per teacher, written as a real PDF via a tiny pure-stdlib PDF writer
+   (no external libraries) - ready to print or email.
+
+The web app (`timetable_tool/webapp.py`) wraps all of the above behind a browser UI.
+
 ## Run from the command line (advanced / scripting)
 
 ```bash
 python3 timetable_tool/agent1_normalise.py source_docs --out output
 python3 timetable_tool/agent2_extract.py output/normalised_master.csv --out output --semester "S2 2026"
 python3 timetable_tool/build_prototype.py
+python3 timetable_tool/make_pdf.py --xlsx output/teacher_timetables_S2_2026.xlsx --dest output/teacher_timetables_S2_2026.pdf --semester "S2 2026"
 ```
 
 No external dependencies required (Excel is written with a stdlib fallback;
