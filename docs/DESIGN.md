@@ -153,6 +153,7 @@ production interface.
 | `class`, `qualification` | e.g. *Diploma … Fulltime VOFF*, `BSB50520` |
 | `semester` | `S2 2026`, `S1 2027`, … or empty when the document states none |
 | `semester_source` | `row` / `carried` / `inferred` / `assumed` / `unknown` — provenance of the above |
+| `year_hint` | year inferred for an undated document (`... OUR 27` → `2027`); blank when `semester` is set |
 | `day`, `channel_or_room` | weekday + channel/room token |
 | `time_start`, `time_end` | tolerant of `-`, `–`, am/pm, no-space |
 | `session_type` | Teaching / Tutorial Support / Self-directed learning |

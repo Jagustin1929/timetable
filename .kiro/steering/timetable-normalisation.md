@@ -48,6 +48,8 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - When filtering to a target semester, rows with an **UNKNOWN** semester are **included**
   (they are undated, not "another semester") and logged as `SEMESTER-ASSUMED`. Only rows
   naming a *different* semester are excluded, logged as `SEMESTER-EXCLUDED`.
+- If an UNKNOWN row's document pins a year (`... OUR 27` → `year_hint=2027`), exclude it
+  from builds of a different year, logged as `SEMESTER-WRONG-YEAR`.
 - Qualification codes (`ICT40120`, `BSB50520`) must be stripped before scanning text for
   years/semester numbers so their digits are never misread.
 

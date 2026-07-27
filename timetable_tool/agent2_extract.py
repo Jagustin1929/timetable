@@ -221,15 +221,30 @@ def main():
     # does); such a row is not "some other semester", it is simply undated and
     # belongs to whatever semester is being built. Requiring exact equality here
     # silently dropped entire documents - and every teacher in them.
-    in_sem, undated, excluded = [], [], []
+    target_year = TARGET.split()[-1] if TARGET.split() else ""
+    in_sem, undated, excluded, wrong_year = [], [], [], []
     for r in rows:
         sem = (r.get("semester") or "").strip()
         if sem == TARGET:
             in_sem.append(r)
-        elif not sem:
-            undated.append(r); in_sem.append(r)
-        else:
+        elif sem:
             excluded.append(r)
+        else:
+            # No semester stated. If the document at least pins a year, only
+            # include it when that year matches the build; otherwise it is
+            # genuinely undated and belongs to whichever semester is built.
+            hint = (r.get("year_hint") or "").strip()
+            if hint and target_year and hint != target_year:
+                wrong_year.append(r)
+            else:
+                undated.append(r); in_sem.append(r)
+
+    if wrong_year:
+        by_file = Counter(r["source_file"] for r in wrong_year)
+        audit.append(["SEMESTER-WRONG-YEAR",
+                      f"{len(wrong_year)} row(s) excluded: no semester stated but the document "
+                      f"is dated to another year (build year {target_year}): "
+                      + "; ".join(f"{f} ({n})" for f, n in sorted(by_file.items()))])
 
     if undated:
         by_file = Counter(r["source_file"] for r in undated)

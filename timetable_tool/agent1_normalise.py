@@ -76,6 +76,32 @@ def _norm_year(y):
     return y if y >= 100 else 2000 + y
 
 
+DOC_YEAR_PATTERNS = [
+    re.compile(r"\b(20\d{2})\b"),        # 2027
+    re.compile(r"\b'?([2-4]\d)\b"),      # 27  (e.g. "... VOF OUR 27")
+]
+
+
+def infer_doc_year(fname, paras=()):
+    """Best-effort document-level YEAR when no full semester can be determined.
+
+    Filenames such as "ICT30120 ... VOF OUR 27" pin the year but not the
+    semester number. Recording the year lets the extraction stage keep those
+    undated rows out of a build for a *different* year, while still including
+    them in any semester of their own year.
+
+    Returns (year_str, basis) or ('', '').
+    """
+    stem = os.path.splitext(os.path.basename(fname))[0]
+    for basis, text in [("filename", stem)] + [("heading", p) for p in paras if p and p.strip()]:
+        clean = QUAL_RE.sub(" ", text.upper())
+        for pat in DOC_YEAR_PATTERNS:
+            m = pat.search(clean)
+            if m:
+                return str(_norm_year(m.group(1))), f"{basis}: '{text.strip()}'"
+    return "", ""
+
+
 def infer_doc_semester(fname, paras=()):
     """Best-effort document-level semester label, e.g. 'S1 2027'.
 
@@ -326,6 +352,14 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
     if doc_sem:
         issues.append({"file": fname, "level": "INFO",
                        "msg": f"Document semester inferred as {doc_sem} from {doc_sem_basis}."})
+    doc_year, doc_year_basis = ("", "")
+    if not doc_sem:
+        doc_year, doc_year_basis = infer_doc_year(fname, doc_paras)
+        if doc_year:
+            issues.append({"file": fname, "level": "INFO",
+                           "msg": f"No semester stated; document year inferred as {doc_year} "
+                                  f"from {doc_year_basis}. Rows will be included in any "
+                                  f"{doc_year} semester."})
 
     if class_defs is None:
         class_defs = auto_class_defs(fname, tables)
@@ -412,6 +446,7 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
                 "qualification": cdef["qual"],
                 "semester": sem_out,
                 "semester_source": sem_src,
+                "year_hint": "" if sem_out else doc_year,
                 "day": day,
                 "channel_or_room": channel,
                 "time_start": tstart,
@@ -445,7 +480,7 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
 # Output
 # ---------------------------------------------------------------------------
 FIELDS = ["source_file", "class", "qualification", "semester", "semester_source",
-          "day", "channel_or_room",
+          "year_hint", "day", "channel_or_room",
           "time_start", "time_end", "session_type", "units", "unit_codes", "notes",
           "weeks_raw", "dates_raw", "teachers", "delivery", "src_table", "src_row"]
 

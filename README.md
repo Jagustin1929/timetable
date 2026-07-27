@@ -66,11 +66,14 @@ Most timetable documents never state their semester — only the combined Diplom
 2. carried forward from the row above (merged cells),
 3. **inferred from the filename/headings** (e.g. `... FTS1 2027` → `S1 2027`),
 4. an explicit `--assume-semester` you pass in,
-5. otherwise **UNKNOWN**.
+5. otherwise **UNKNOWN** — but if the document at least pins a *year*
+   (e.g. `... VOF OUR 27` → `2027`) that year is recorded as a `year_hint`.
 
 Rows that end up UNKNOWN are **included in whichever semester you build** and listed
-in the audit as `SEMESTER-ASSUMED`. Only rows that explicitly name a *different*
-semester are excluded (logged as `SEMESTER-EXCLUDED`).
+in the audit as `SEMESTER-ASSUMED`. Rows that explicitly name a *different* semester
+are excluded (`SEMESTER-EXCLUDED`), and UNKNOWN rows whose `year_hint` belongs to a
+different year are also excluded (`SEMESTER-WRONG-YEAR`) so 2027 documents cannot
+leak into a 2026 build.
 
 > Earlier versions stamped a hardcoded `S2 2026` on any document that stated no
 > semester. Building any other semester silently dropped those documents entirely —
