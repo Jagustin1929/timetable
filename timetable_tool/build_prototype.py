@@ -171,7 +171,10 @@ td.num,th.num{text-align:right}tr:hover td{background:#fafbfe}
  </section>
 
  <section class="panel" id="p-workload">
-  <div class="card"><h2>Workload summary</h2><p class="sub">Audit-ready. Semester hours = session length &times; number of weeks.</p>
+  <div class="card"><h2>Workload summary</h2><p class="sub">Audit-ready. Semester hours = net session length &times; number of weeks.
+  Sessions longer than 4 hours have a 30-minute unpaid break deducted (9:00&ndash;2:30 counts as 5 hours, not 5.5);
+  evening classes of 4 hours (5:30&ndash;9:30pm) run without a break and count in full.
+  A full load is 360 hours per semester; <b>ON TRACK</b> is 90&ndash;110% of expected, <b>UNDER</b> below 90%, <b>OVER</b> above 110%.</p>
    <table id="wtab"></table></div>
  </section>
 
@@ -216,13 +219,16 @@ names.forEach((n,i)=>{const b=document.createElement('button');b.className='tbtn
 function pickTeacher(n,btn){document.querySelectorAll('.tbtn').forEach(x=>x.classList.remove('on'));btn.classList.add('on');
  const rows=DATA.teachers[n];const sum=DATA.summary.find(r=>r.Teacher===n)||{};
  const co=document.getElementById('thours');co.style.display='block';
- co.innerHTML=`<b>${n}</b> &middot; ${rows.length} sessions across ${sum['# classes']||'?'} classes &middot; ${sum['# distinct units']||'?'} units &middot; <b>${sum['Semester contact hrs']||'?'}h</b> semester contact`;
+ const st=sum['Status']||'';
+ const stCol=st==='OVER'?'#b45309':(st==='UNDER'?'#0369a1':'#15803d');
+ const load=sum['Expected hrs']?` &middot; <b style="color:${stCol}">${st}</b> at ${sum['% of load']}% of a ${sum['Load fraction']} load (${sum['Expected hrs']}h expected)`:'';
+ co.innerHTML=`<b>${n}</b> &middot; ${rows.length} sessions across ${sum['# classes']||'?'} classes &middot; ${sum['# distinct units']||'?'} units &middot; <b>${sum['Semester contact hrs']||'?'}h</b> semester contact${load}`;
  const grid=document.getElementById('tgrid');grid.innerHTML='';
  DAYS.forEach(day=>{const col=document.createElement('div');col.className='col';col.innerHTML=`<h4>${day}</h4>`;
   rows.filter(r=>r.Day===day).forEach(r=>{const bl=document.createElement('div');bl.className='block';
    bl.innerHTML=`<div class="t">${r.Time}</div><div class="u">${r['Units / activity']||r['Session type']}</div>
    <div class="t">${r.Class}</div>
-   <div class="m"><span class="tag wk">Wk ${r.Weeks}</span>${modeTags(r.Delivery,r['Session type'])}<span class="co">${r['Contact hrs (x weeks)']?('&middot; '+r['Contact hrs (x weeks)']+'h'):''}</span></div>
+   <div class="m"><span class="tag wk">Wk ${r.Weeks}</span>${modeTags(r.Delivery,r['Session type'])}<span class="co">${r['Contact hrs (net x weeks)']?('&middot; '+r['Contact hrs (net x weeks)']+'h'):''}${r.Break?(' &middot; less '+r.Break+'h break'):''}</span></div>
    ${r['Co-teacher(s)']?`<div class="co">with ${r['Co-teacher(s)']}</div>`:''}`;col.appendChild(bl);});
   grid.appendChild(col);});}
 pickTeacher(names[0],document.querySelector('.tbtn'));

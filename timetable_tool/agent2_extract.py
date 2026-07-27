@@ -23,6 +23,9 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xlsx_util import write_workbook
 from adjustments import ADJUSTMENTS, MERGE_COMBINED_CERT3, COMBINED_LABEL
+from workload import (apply_break, fraction_for, expected_hours, load_percent,
+                      status_for, FULLTIME_SEMESTER_HOURS, BREAK_DEDUCTION_HOURS,
+                      ON_TRACK_MIN_PCT, ON_TRACK_MAX_PCT)
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 DAY_ORDER = {d: i for i, d in enumerate(WEEKDAYS)}
@@ -265,7 +268,11 @@ def main():
             "class": r["class"], "day": r["day"], "day_order": DAY_ORDER.get(r["day"], 9),
             "t_start": r["time_start"], "t_end": r["time_end"],
             "time": f'{r["time_start"]}-{r["time_end"]}'.strip("-"),
-            "hours": span_hours(r["time_start"], r["time_end"]),
+            # "hours" is NET teaching hours: a session over 3 hours has the
+            # 30-minute unpaid break deducted (9:00-2:30 counts as 5, not 5.5).
+            # All contact-hour and workload figures use the net value.
+            "hours_gross": span_hours(r["time_start"], r["time_end"]),
+            "hours": apply_break(span_hours(r["time_start"], r["time_end"])),
             "wkset": wk, "weeks_raw": r["weeks_raw"],
             "session_type": r["session_type"], "units": r["units"] or r["notes"],
             "delivery": r["delivery"],
@@ -285,7 +292,7 @@ def main():
             wkset = b["tweeks"].get(name, b["wkset"])
             sessions.append({**{k: b[k] for k in
                               ("class", "day", "day_order", "t_start", "t_end", "time",
-                               "hours", "session_type", "units", "delivery", "src")},
+                               "hours", "hours_gross", "session_type", "units", "delivery", "src")},
                              "teacher_raw": name, "mode": mode or b["delivery"],
                              "wkset": wkset, "wkcount": len(wkset),
                              # co-teachers = only those whose weeks OVERLAP this teacher's
@@ -320,7 +327,8 @@ def main():
     teachers = sorted({s["teacher"] for s in sessions})
 
     # ---- per-teacher sheets + clash detection ----
-    T_HEADER = ["Day", "Time", "Weeks", "Hrs/session", "Contact hrs (x weeks)",
+    T_HEADER = ["Day", "Time", "Weeks", "Hrs (rostered)", "Break", "Hrs/session (net)",
+                "Contact hrs (net x weeks)",
                 "Class", "Delivery", "Session type", "Units / activity", "Co-teacher(s)"]
     per_sheet, per_hours, clashes = {}, {}, []
     for t in teachers:
@@ -331,8 +339,13 @@ def main():
             contact = round((s["hours"] or 0) * s["wkcount"], 2) if s["hours"] else ""
             if isinstance(contact, float):
                 total += contact
+            gross, net = s.get("hours_gross"), s["hours"]
+            deducted = (round(gross - net, 2)
+                        if gross is not None and net is not None and gross != net else "")
             rows_out.append([s["day"], s["time"], weeks_label(s["wkset"]),
-                             s["hours"] if s["hours"] is not None else "?", contact,
+                             gross if gross is not None else "?",
+                             deducted,
+                             net if net is not None else "?", contact,
                              s["class"], s["mode"] or "", s["session_type"],
                              s["units"], ", ".join(s["coteachers"])])
         per_hours[t] = round(total, 2)
@@ -352,15 +365,36 @@ def main():
 
     # ---- summary ----
     summary_header = ["Teacher", "# sessions", "# classes", "# distinct units",
-                      "Weekly contact hrs", "Semester contact hrs", "Classes"]
+                      "Weekly contact hrs", "Semester contact hrs",
+                      "Load fraction", "Expected hrs", "% of load", "Status", "Classes"]
     summary_rows = []
+    no_fraction = []
     for t in teachers:
         mine = [s for s in sessions if s["teacher"] == t]
         classes = sorted({s["class"] for s in mine})
         units = {u for s in mine for u in UNIT_CODE_RE.findall(s["units"])}
         weekly = round(sum((s["hours"] or 0) for s in mine), 2)
+        actual = per_hours[t]
+        frac, exp = fraction_for(t), expected_hours(t)
+        pct = load_percent(t, actual)
+        if frac is None:
+            no_fraction.append(t)
         summary_rows.append([t, len(mine), len(classes), len(units),
-                             weekly, per_hours[t], "; ".join(classes)])
+                             weekly, actual,
+                             frac if frac is not None else "",
+                             exp if exp is not None else "",
+                             pct if pct is not None else "",
+                             status_for(pct), "; ".join(classes)])
+
+    if no_fraction:
+        audit.append(["WORKLOAD-NO-FRACTION",
+                      "No teaching-load fraction defined for: " + ", ".join(no_fraction)
+                      + ". Expected hours and status cannot be calculated. Add them to "
+                        "timetable_tool/workload.py."])
+    off_track = [(r[0], r[8], r[9]) for r in summary_rows if r[9] in ("UNDER", "OVER")]
+    if off_track:
+        audit.append(["WORKLOAD-OFF-TRACK",
+                      "; ".join(f"{n} {s} ({p}% of load)" for n, p, s in off_track)])
 
     # ---- reconciliation + audit ----
     recon = [
@@ -374,6 +408,12 @@ def main():
         ["Name-merge decisions", len(merges)],
         ["Ambiguous name matches", len(ambiguous)],
         ["Clashes detected", len(clashes)],
+        ["Full-time load (hrs/semester)", FULLTIME_SEMESTER_HOURS],
+        ["Break deducted when session > 3 hrs", BREAK_DEDUCTION_HOURS],
+        ["ON TRACK band", f"{ON_TRACK_MIN_PCT:g}-{ON_TRACK_MAX_PCT:g}% of expected hours"],
+        ["Teachers ON TRACK", sum(1 for r in summary_rows if r[9] == "ON TRACK")],
+        ["Teachers UNDER", sum(1 for r in summary_rows if r[9] == "UNDER")],
+        ["Teachers OVER", sum(1 for r in summary_rows if r[9] == "OVER")],
     ]
     for m, c in merges:
         audit.append(["NAME-MERGE", f"'{m}' -> '{c}'"])
@@ -414,10 +454,15 @@ def main():
     for a in audit:
         if a[0] == "ADJ-APPLIED":
             print("   -", a[1])
-    print("\nWorkload summary:")
-    print(f"  {'Teacher':16}{'sess':>5}{'cls':>4}{'units':>6}{'wk hrs':>8}{'sem hrs':>9}")
+    print(f"\nWorkload summary  (full load = {FULLTIME_SEMESTER_HOURS:g} hrs/semester; "
+          f"ON TRACK = {ON_TRACK_MIN_PCT:g}-{ON_TRACK_MAX_PCT:g}%)")
+    print(f"  {'Teacher':16}{'sess':>5}{'wk hrs':>8}{'sem hrs':>9}"
+          f"{'frac':>6}{'expect':>8}{'%load':>7}  status")
     for r in summary_rows:
-        print(f"  {r[0]:16}{r[1]:>5}{r[2]:>4}{r[3]:>6}{r[4]:>8}{r[5]:>9}")
+        frac = f"{r[6]:g}" if r[6] != "" else "-"
+        exp = f"{r[7]:g}" if r[7] != "" else "-"
+        pct = f"{r[8]:g}" if r[8] != "" else "-"
+        print(f"  {r[0]:16}{r[1]:>5}{r[4]:>8}{r[5]:>9}{frac:>6}{exp:>8}{pct:>7}  {r[9]}")
     print(f"\nCLASHES remaining: {len(clashes)}")
     for c in clashes:
         print("   -", c)
