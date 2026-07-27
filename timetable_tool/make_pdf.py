@@ -13,7 +13,7 @@ from pdf_util import SimplePDF
 COLS = [("Day", 58), ("Time", 92), ("Weeks", 62), ("Hrs", 34),
         ("Class", 176), ("Mode", 60), ("Type", 78), ("Unit / activity", 210)]
 # source column name for each display column
-SRC = {"Day": "Day", "Time": "Time", "Weeks": "Weeks", "Hrs": "Hrs/session",
+SRC = {"Day": "Day", "Time": "Time", "Weeks": "Weeks", "Hrs": "Hrs/session (net)",
        "Class": "Class", "Mode": "Delivery", "Type": "Session type",
        "Unit / activity": "Units / activity"}
 NON_TEACHER = {"Summary", "Reconciliation", "Clashes", "Unassigned sessions",
@@ -85,6 +85,10 @@ def main():
         subtitle = (f"{s.get('# sessions','?')} sessions | {s.get('# classes','?')} classes | "
                     f"{s.get('# distinct units','?')} units | "
                     f"{s.get('Semester contact hrs','?')} contact hrs")
+        if s.get("Expected hrs"):
+            subtitle += (f" | {s.get('Load fraction','?')} load, "
+                         f"{s.get('Expected hrs','?')}h expected, "
+                         f"{s.get('% of load','?')}% - {s.get('Status','')}")
         pdf.add_page()
         y = draw_page_header(pdf, t, args.semester, subtitle)
         for row in body:

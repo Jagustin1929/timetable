@@ -57,6 +57,47 @@ python3 timetable_tool/make_pdf.py --xlsx output/teacher_timetables_S2_2026.xlsx
 No external dependencies required (Excel is written with a stdlib fallback;
 `openpyxl` is used automatically if installed).
 
+## Workload calculation (authoritative)
+
+Defined in `timetable_tool/workload.py` — update it there each semester.
+
+**A full teaching load is 360 delivery hours per semester.**
+
+| Teacher | Fraction | Expected hrs |
+|---|---|---|
+| Graham Barber | 1.0 | 360 |
+| Narelle Bell | 1.0 | 360 |
+| Shaun Stummer | 0.9 | 324 |
+| Jennie Agustin | 0.5 | 180 |
+| Shanna Roper | 0.5 | 180 |
+| Anu Joshi | 0.5 | 180 |
+| Judi Stievenard | 0.3 | 108 |
+| Martina Clark | 0.2 | 72 |
+| Cathy Shay | 0.2 | 72 |
+| Rima Andrews | 0.2 | 72 |
+
+**Hours.** For recurring delivery with numeric week ranges:
+
+```
+Total hours = net session hours x number of weeks
+```
+
+**Unpaid break.** A session of **more than 3 hours** has **30 minutes** deducted, so
+9:00–2:30 counts as **5** teaching hours, not 5.5. Sessions of 3 hours or less are
+unchanged. The teacher sheets show the rostered hours, the deduction and the net hours
+side by side so the figure can be audited.
+
+**Status** — actual hours as a percentage of expected:
+
+| Status | Band |
+|---|---|
+| **ON TRACK** | 90–110% |
+| **UNDER** | below 90% |
+| **OVER** | above 110% |
+
+A teacher with no fraction defined gets no expected hours or status, and is reported in
+the audit sheet under `WORKLOAD-NO-FRACTION` rather than being silently skipped.
+
 ## Uploading and revising timetables (web interface)
 
 Uploaded files are kept in `webapp_data/source_docs/`. **The `source_docs/` folder in the
