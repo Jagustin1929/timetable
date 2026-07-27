@@ -76,10 +76,57 @@ def _norm_year(y):
     return y if y >= 100 else 2000 + y
 
 
-DOC_YEAR_PATTERNS = [
-    re.compile(r"\b(20\d{2})\b"),        # 2027
-    re.compile(r"\b'?([2-4]\d)\b"),      # 27  (e.g. "... VOF OUR 27")
-]
+# ---------------------------------------------------------------------------
+# Semester from the actual dates in the "Date of Study" column.
+#
+# This is the AUTHORITATIVE source: the real dates determine which semester and
+# year a session belongs to. Filenames and headings are only fallbacks for rows
+# that carry no usable date.
+#
+# Semester boundary: months 1-6 => Semester 1, months 7-12 => Semester 2.
+# Validated against every row in the source set that states its own semester
+# (47 rows agree, 0 disagree).
+# ---------------------------------------------------------------------------
+# A four-digit year may legitimately be followed by another digit, because two
+# dates sometimes run together with no separator ("27/10/20271/12/2027").
+# A two-digit year followed by a digit is instead a TRUNCATED four-digit year
+# ("03/12/202" for 2026) and must be rejected rather than read as 2020.
+DATE_RE = re.compile(r"(\d{1,2})\s*/\s*(\d{1,2})\s*/\s*(?:(\d{4})|(\d{2})(?!\d))")
+TRUNCATED_DATE_RE = re.compile(r"\d{1,2}\s*/\s*\d{1,2}\s*/\s*\d{3}(?!\d)")
+
+
+def semester_from_dates(text):
+    """Derive (label, basis, all_labels) from real dates, e.g. 'S1 2027'.
+
+    Handles the formats seen in the source documents:
+        "22/07/2026 02/12/2026"          two dates, space separated
+        "20/7/2026-30/11/2026"           range with hyphen, single-digit d/m
+        "27/10/20271/12/2027"            missing separator between two dates
+        "9/2/2028- 5/4/2028 24/4/2028-21/6/2028"
+    The earliest valid date decides the semester. all_labels reports every
+    distinct semester the dates touch so a row spanning a boundary can be
+    flagged rather than silently mis-filed.
+    """
+    found = []
+    for d, m, y4, y2 in DATE_RE.findall(text or ""):
+        day, month, year = int(d), int(m), _norm_year(y4 or y2)
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            continue
+        found.append(((year, month, day), f"S{1 if month <= 6 else 2} {year}"))
+    if not found:
+        return "", "", []
+    found.sort()
+    labels = sorted({lab for _k, lab in found})
+    return found[0][1], f"dates: '{(text or '').strip()[:60]}'", labels
+
+
+YEAR4_RE = re.compile(r"\b(20\d{2})\b")                      # 2027
+# A bare two-digit year is only trusted in the FILENAME (e.g. "... VOF OUR 27")
+# and only within a plausible range. Numbers in body text - room numbers, week
+# counts, "12 months" - must never be read as a year, because a wrong year
+# hint silently EXCLUDES sessions from the build.
+YEAR2_RE = re.compile(r"(?:^|[\s_'\-])'?([23]\d)(?=$|[\s_.)\-])")
+TRUSTED_2DIGIT_YEARS = set(range(2025, 2041))
 
 
 def infer_doc_year(fname, paras=()):
@@ -90,15 +137,29 @@ def infer_doc_year(fname, paras=()):
     undated rows out of a build for a *different* year, while still including
     them in any semester of their own year.
 
+    Deliberately conservative: returning a wrong year removes sessions from the
+    output, so we would rather return nothing than guess.
+
     Returns (year_str, basis) or ('', '').
     """
     stem = os.path.splitext(os.path.basename(fname))[0]
-    for basis, text in [("filename", stem)] + [("heading", p) for p in paras if p and p.strip()]:
-        clean = QUAL_RE.sub(" ", text.upper())
-        for pat in DOC_YEAR_PATTERNS:
-            m = pat.search(clean)
-            if m:
-                return str(_norm_year(m.group(1))), f"{basis}: '{text.strip()}'"
+    clean_stem = QUAL_RE.sub(" ", stem.upper())
+
+    m = YEAR4_RE.search(clean_stem)
+    if m:
+        return m.group(1), f"filename: '{stem}'"
+    for m in YEAR2_RE.finditer(clean_stem):
+        year = _norm_year(m.group(1))
+        if year in TRUSTED_2DIGIT_YEARS:
+            return str(year), f"filename: '{stem}'"
+
+    # Headings: four-digit years only.
+    for p in paras:
+        if not p or not p.strip():
+            continue
+        m = YEAR4_RE.search(QUAL_RE.sub(" ", p.upper()))
+        if m:
+            return m.group(1), f"heading: '{p.strip()}'"
     return "", ""
 
 
@@ -385,6 +446,7 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
                            "class": cdef["class"], "src_table": ti + 1})
         last_day = ("", "", "")     # (day, sem, channel)
         last_sem = ""
+        last_date_sem = ""          # last semester derived from real dates
         last_time_val = ("", "")
         for ri, row in enumerate(rows[1:], start=1):
             def cell(role):
@@ -403,13 +465,43 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
             if day or sem:
                 last_day = (day or last_day[0], sem or last_sem, channel or last_day[2])
                 last_sem = sem or last_sem
-            # Semester precedence: stated in this row > carried from the row above
-            # > inferred for the whole document > explicit caller fallback.
-            # NEVER a hardcoded literal - see infer_doc_semester().
-            if sem:
+            # Semester precedence. The ACTUAL DATES in the Date of Study column
+            # are authoritative - they are what determines the semester and year.
+            # Everything else is a fallback for rows with no usable date.
+            # NEVER a hardcoded literal - see semester_from_dates().
+            date_text = " ".join(date_cell).strip()
+            date_sem, date_basis, date_labels = semester_from_dates(date_text)
+            bad_date = TRUNCATED_DATE_RE.search(date_text)
+            if bad_date:
+                issues.append({"file": fname, "level": "WARN",
+                               "msg": f"[{cdef['class']}] row {ri} has a malformed date "
+                                      f"'{bad_date.group(0)}' (incomplete year) which was ignored. "
+                                      f"Fix it in the source document. Dates: {date_text}",
+                               "class": cdef["class"], "src_table": ti + 1, "src_row": ri})
+            if date_sem:
+                last_date_sem = date_sem
+            if date_sem:
+                sem_out, sem_src = date_sem, "dates"
+                if len(date_labels) > 1:
+                    issues.append({"file": fname, "level": "WARN",
+                                   "msg": f"[{cdef['class']}] row {ri} dates span more than one "
+                                          f"semester ({', '.join(date_labels)}); filed under "
+                                          f"{date_sem} from the earliest date. Dates: {date_text}",
+                                   "class": cdef["class"], "src_table": ti + 1, "src_row": ri})
+                if sem and sem != date_sem:
+                    issues.append({"file": fname, "level": "WARN",
+                                   "msg": f"[{cdef['class']}] row {ri} states '{sem}' but its "
+                                          f"dates give '{date_sem}'. Using the dates. "
+                                          f"Dates: {date_text}",
+                                   "class": cdef["class"], "src_table": ti + 1, "src_row": ri})
+            elif sem:
                 sem_out, sem_src = sem, "row"
             elif last_sem:
                 sem_out, sem_src = last_sem, "carried"
+            elif last_date_sem:
+                # No date of its own (blank/merged cell): belongs with the
+                # preceding dated rows of the same table.
+                sem_out, sem_src = last_date_sem, "carried-dates"
             elif doc_sem:
                 sem_out, sem_src = doc_sem, "inferred"
             elif assumed_semester:

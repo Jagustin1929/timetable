@@ -152,7 +152,7 @@ production interface.
 | `source_file`, `src_table`, `src_row` | provenance back to the exact Word cell |
 | `class`, `qualification` | e.g. *Diploma … Fulltime VOFF*, `BSB50520` |
 | `semester` | `S2 2026`, `S1 2027`, … or empty when the document states none |
-| `semester_source` | `row` / `carried` / `inferred` / `assumed` / `unknown` — provenance of the above |
+| `semester_source` | `dates` / `row` / `carried` / `carried-dates` / `inferred` / `assumed` / `unknown` — provenance of the above |
 | `year_hint` | year inferred for an undated document (`... OUR 27` → `2027`); blank when `semester` is set |
 | `day`, `channel_or_room` | weekday + channel/room token |
 | `time_start`, `time_end` | tolerant of `-`, `–`, am/pm, no-space |
@@ -216,7 +216,9 @@ Hrs/session, Contact hrs, Class, Delivery, Session type, Units, Co-teachers).
 | Merged Day/Time cells | carry-forward from the row above |
 | Header wording varies (*Day and Channel/Room/Day*) | match by **header text**, fall back to position (+WARN) |
 | Extra / reordered columns | header-driven mapping; no fixed-width truncation |
-| Document states no semester at all | infer from filename/headings, else UNKNOWN + included in the built semester |
+| Which semester/year a session belongs to | **derived from the real dates in Date of Study** (months 1-6 = S1, 7-12 = S2) |
+| Document states no semester at all | dates decide; else infer from filename/headings, else UNKNOWN + included in the built semester |
+| Malformed date (`03/12/202`), dates run together (`27/10/20271/12/2027`) | truncated year rejected + WARN; concatenated dates both parsed |
 | `Online`, `VOF` | normalise to `VOFF` |
 | Duplicated names, `and`/`;` separators | split + de-duplicate |
 | Same person, different spelling | fuzzy canonicalisation, ambiguity flagged |

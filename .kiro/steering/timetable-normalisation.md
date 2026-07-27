@@ -41,10 +41,17 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 
 ## Semester determination
 
+- **The actual dates in the "Date of Study" column determine the semester and year.**
+  Always derive it from those dates first; treat them as authoritative over any stated
+  semester (log a `WARN` when they disagree). Boundary: months 1-6 = Semester 1,
+  months 7-12 = Semester 2.
 - **NEVER hardcode a semester default** (e.g. `"S2 2026"`) anywhere in the pipeline.
   Documents that state no semester must be marked `UNKNOWN`, not stamped with a guess.
-- Precedence: row text → carried forward from row above → inferred from
-  filename/headings (`FTS1 2027` → `S1 2027`) → explicit `--assume-semester` → `UNKNOWN`.
+- Precedence: **Date of Study dates** → row text → carried forward from row above →
+  carried from preceding dated rows → inferred from filename/headings → explicit
+  `--assume-semester` → `UNKNOWN`.
+- Never read a truncated year (`03/12/202`) as a two-digit year; reject it and warn.
+  Two dates may run together with no separator (`27/10/20271/12/2027`).
 - When filtering to a target semester, rows with an **UNKNOWN** semester are **included**
   (they are undated, not "another semester") and logged as `SEMESTER-ASSUMED`. Only rows
   naming a *different* semester are excluded, logged as `SEMESTER-EXCLUDED`.
