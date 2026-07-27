@@ -25,9 +25,12 @@ TEACHER_FRACTIONS = {
     "Narelle Bell":    1.0,
 }
 
-# Unpaid break: a session longer than 3 hours has 30 minutes deducted, so a
+# Unpaid break: a session longer than 4 hours has 30 minutes deducted, so a
 # 9:00-2:30 session counts as 5 teaching hours rather than 5.5.
-BREAK_THRESHOLD_HOURS = 3.0
+#
+# The threshold is 4 hours, not 3: evening classes run 5:30-9:30pm straight
+# through with no break, and 4 hours must therefore count in full.
+BREAK_THRESHOLD_HOURS = 4.0
 BREAK_DEDUCTION_HOURS = 0.5
 
 # Percentage-of-load bands.
@@ -42,10 +45,11 @@ STATUS_OVER = "OVER"
 def apply_break(gross_hours):
     """Net teaching hours for one session after the unpaid break deduction.
 
-    A session of MORE than 3 hours loses 30 minutes:
-        5.5 -> 5.0      (9:00-2:30)
+    A session of MORE than 4 hours loses 30 minutes:
         6.5 -> 6.0      (9:00-3:30)
-        3.0 -> 3.0      (no deduction: not more than 3 hours)
+        5.5 -> 5.0      (9:00-2:30)
+        4.0 -> 4.0      (5:30-9:30pm evening class: no break, counts in full)
+        3.0 -> 3.0      (no deduction)
     """
     if gross_hours is None:
         return None

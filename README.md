@@ -82,10 +82,11 @@ Defined in `timetable_tool/workload.py` — update it there each semester.
 Total hours = net session hours x number of weeks
 ```
 
-**Unpaid break.** A session of **more than 3 hours** has **30 minutes** deducted, so
-9:00–2:30 counts as **5** teaching hours, not 5.5. Sessions of 3 hours or less are
-unchanged. The teacher sheets show the rostered hours, the deduction and the net hours
-side by side so the figure can be audited.
+**Unpaid break.** A session of **more than 4 hours** has **30 minutes** deducted, so
+9:00–2:30 counts as **5** teaching hours, not 5.5. Sessions of 4 hours or less count in
+full — evening classes run 5:30–9:30pm straight through with no break, so those 4 hours
+are counted whole. The teacher sheets show the rostered hours, the deduction and the net
+hours side by side so the figure can be audited.
 
 **Status** — actual hours as a percentage of expected:
 

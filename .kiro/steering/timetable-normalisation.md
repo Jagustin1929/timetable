@@ -67,9 +67,11 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - A full load is **360 delivery hours per semester**; expected hours = 360 x fraction.
 - `Total hours = net session hours x number of weeks` for recurring delivery with
   numeric week ranges.
-- **Unpaid break:** a session of MORE than 3 hours loses 30 minutes (9:00-2:30 = 5 hours,
-  not 5.5). Apply it to the hours used for every contact-hour and workload figure, and
-  show rostered / deduction / net separately so the number can be audited.
+- **Unpaid break:** a session of MORE than 4 hours loses 30 minutes (9:00-2:30 = 5 hours,
+  not 5.5). The threshold is 4 hours, not 3 — evening classes run 5:30-9:30pm with no
+  break and must count in full. Apply it to the hours used for every contact-hour and
+  workload figure, and show rostered / deduction / net separately so the number can be
+  audited.
 - Status bands: **ON TRACK** 90-110%, **UNDER** <90%, **OVER** >110% of expected hours.
 - A teacher with no fraction defined must be reported (`WORKLOAD-NO-FRACTION`), never
   silently omitted from the workload check.

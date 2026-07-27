@@ -172,7 +172,8 @@ td.num,th.num{text-align:right}tr:hover td{background:#fafbfe}
 
  <section class="panel" id="p-workload">
   <div class="card"><h2>Workload summary</h2><p class="sub">Audit-ready. Semester hours = net session length &times; number of weeks.
-  Sessions longer than 3 hours have a 30-minute unpaid break deducted (9:00&ndash;2:30 counts as 5 hours, not 5.5).
+  Sessions longer than 4 hours have a 30-minute unpaid break deducted (9:00&ndash;2:30 counts as 5 hours, not 5.5);
+  evening classes of 4 hours (5:30&ndash;9:30pm) run without a break and count in full.
   A full load is 360 hours per semester; <b>ON TRACK</b> is 90&ndash;110% of expected, <b>UNDER</b> below 90%, <b>OVER</b> above 110%.</p>
    <table id="wtab"></table></div>
  </section>
