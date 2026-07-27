@@ -60,6 +60,17 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - Qualification codes (`ICT40120`, `BSB50520`) must be stripped before scanning text for
   years/semester numbers so their digits are never misread.
 
+## Uploads and revisions
+
+- Uploads live in `webapp_data/source_docs/`; never write to the repository's
+  `source_docs/`, which is the reference copy.
+- Support revising a **single** timetable mid-semester without re-uploading the whole set.
+- Supersede a previous version **by class identity, not filename** — a revision often
+  arrives renamed (`... combined.docx` -> `... combined 2.docx`), and keeping both would
+  double-count every session and invent clashes.
+- Always report what an upload added / updated / superseded / discarded / kept. Never
+  replace or discard a timetable silently.
+
 ## Table columns
 
 - Locate columns by **header text** (`Day`/`Day and Room`/`Day and Channel`,

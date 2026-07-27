@@ -57,6 +57,25 @@ python3 timetable_tool/make_pdf.py --xlsx output/teacher_timetables_S2_2026.xlsx
 No external dependencies required (Excel is written with a stdlib fallback;
 `openpyxl` is used automatically if installed).
 
+## Uploading and revising timetables (web interface)
+
+Uploaded files are kept in `webapp_data/source_docs/`. **The `source_docs/` folder in the
+repository is never touched** — it stays as a reference copy.
+
+The upload page lists the timetables currently held and offers two choices:
+
+| Choice | Use when | Effect |
+|---|---|---|
+| **Add or update** | a revised timetable part-way through the semester | keeps everything already held; replaces only the classes you upload now |
+| **Start a fresh set** | beginning of a new semester | discards everything held, uses only what you upload |
+
+A revision supersedes the previous version **by class, not by filename**, so uploading
+`... combined 2.docx` correctly replaces `... combined.docx` instead of leaving both in
+place and double-counting every session. After each upload the app lists exactly what was
+added, updated, superseded, discarded or kept, so nothing changes silently.
+
+"Remove all" clears the held set.
+
 ## Semesters (important)
 
 **The actual dates in the "Date of Study" column determine the semester and year.**
