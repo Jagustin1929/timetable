@@ -39,6 +39,26 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - The two **ICT30120** files are separate classes (not duplicates); a teacher may legitimately
   appear in both.
 
+## Semester determination
+
+- **NEVER hardcode a semester default** (e.g. `"S2 2026"`) anywhere in the pipeline.
+  Documents that state no semester must be marked `UNKNOWN`, not stamped with a guess.
+- Precedence: row text → carried forward from row above → inferred from
+  filename/headings (`FTS1 2027` → `S1 2027`) → explicit `--assume-semester` → `UNKNOWN`.
+- When filtering to a target semester, rows with an **UNKNOWN** semester are **included**
+  (they are undated, not "another semester") and logged as `SEMESTER-ASSUMED`. Only rows
+  naming a *different* semester are excluded, logged as `SEMESTER-EXCLUDED`.
+- Qualification codes (`ICT40120`, `BSB50520`) must be stripped before scanning text for
+  years/semester numbers so their digits are never misread.
+
+## Table columns
+
+- Locate columns by **header text** (`Day`/`Day and Room`/`Day and Channel`,
+  `Teacher`/`Teachers`/`Trainer`), falling back to fixed positions only for columns that
+  cannot be identified — and raise a `WARN` when that happens.
+- Never truncate rows to a fixed column count; a document with an extra column
+  previously dropped the Teacher column silently.
+
 ## Agent 1 scope (structural normalisation only)
 
 - No co-teaching split, no teacher renaming, no aggregation, no FTE. Co-teachers stay in one row.

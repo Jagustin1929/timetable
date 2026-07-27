@@ -64,9 +64,12 @@ def analyze_data():
     rows = list(csv.DictReader(open(MASTER, encoding="utf-8")))
     sem_counts = Counter(r["semester"].strip() for r in rows if r["semester"].strip())
     semesters = sorted(sem_counts.items(), key=lambda kv: _sem_key(kv[0]))
-    default = sem_counts.most_common(1)[0][0] if sem_counts else "S2 2026"
+    default = sem_counts.most_common(1)[0][0] if sem_counts else ""
     classes = sorted(Counter(r["class"] for r in rows).items())
-    return semesters, default, classes
+    # Rows whose document never stated a semester. These are included in
+    # whichever semester is built, so the user needs to see them.
+    undated = Counter(r["source_file"] for r in rows if not r["semester"].strip())
+    return semesters, default, classes, undated
 
 
 def run_extract(semester):
@@ -80,7 +83,8 @@ def run_extract(semester):
     if ok:
         _run("Build results view",
              [PY, os.path.join(TOOLS, "build_prototype.py"),
-              "--xlsx", tt_xlsx, "--dest", RESULTS_HTML, "--semester", semester], log)
+              "--xlsx", tt_xlsx, "--dest", RESULTS_HTML, "--semester", semester,
+              "--master", MASTER], log)
         _run("Render PDF timetables",
              [PY, os.path.join(TOOLS, "make_pdf.py"),
               "--xlsx", tt_xlsx, "--dest", tt_pdf, "--semester", semester], log)
@@ -154,20 +158,31 @@ def upload_form():
       </form>""")
 
 
-def choose_page(semesters, default, classes):
+def choose_page(semesters, default, classes, undated=None):
     opts = "".join(
         f'<option value="{urllib.parse.quote(s)}"{" selected" if s == default else ""}>{s} ({n} sessions)</option>'
         for s, n in semesters)
     cls = "".join(f"<li>{c} <span class='hint'>({n})</span></li>" for c, n in classes)
+    undated = undated or {}
+    if undated:
+        items = "".join(f"<li>{f} <span class='hint'>({n} sessions)</span></li>"
+                        for f, n in sorted(undated.items()))
+        note = (f"""<div class="card"><label>Documents that do not state a semester</label>
+        <p class="sub">These {sum(undated.values())} session(s) will be included in whichever
+        semester you choose above, because the document itself gives no semester.</p>
+        <ul class="cls">{items}</ul></div>""")
+    else:
+        note = ""
     return page(f"""
       <h1>Choose semester <span class="tag">step 2 of 2</span></h1>
       <p class="sub">Detected {len(classes)} class(es) across your files. Pick the semester to build.</p>
       <form class="card" method="POST" action="/generate">
         <label>Semester</label>
-        <select name="semester">{opts or '<option>S2 2026</option>'}</select>
+        <select name="semester">{opts or '<option>(none detected)</option>'}</select>
         <div style="margin-top:16px"><button type="submit">Generate teacher timetables</button>
         <a class="dl sec" href="/" style="margin-left:8px">&#8617; Start over</a></div>
       </form>
+      {note}
       <div class="card"><label>Classes detected</label><ul class="cls">{cls}</ul></div>""")
 
 
@@ -266,8 +281,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, page(f"<div class='card err'><b>Could not read the documents.</b> "
                                      f"<a href='/'>Start over</a></div>"
                                      f"<div class='card'><pre>{log}</pre></div>")); return
-            semesters, default, classes = analyze_data()
-            self._send(200, choose_page(semesters, default, classes))
+            semesters, default, classes, undated = analyze_data()
+            self._send(200, choose_page(semesters, default, classes, undated))
         elif path == "/generate":
             if not os.path.exists(MASTER):
                 self._send(303, "", extra={"Location": "/"}); return

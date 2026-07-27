@@ -110,8 +110,11 @@ Agent 1 **keeps teachers verbatim** and does **not** split co-teaching — by de
 
 ### 5.2 Agent 2/3 — Consolidate & Extract (`agent2_extract.py`)
 Reads the normalised master and performs, in order:
-1. **Semester filter** — keeps only rows whose parsed semester equals the target
-   (default `S2 2026`). Necessary because the Diploma spans S2 2026 → S1 2028.
+1. **Semester filter** — keeps rows whose parsed semester equals the target **plus**
+   rows with no stated semester (undated documents belong to whatever semester is being
+   built; they are logged as `SEMESTER-ASSUMED`). Rows naming a different semester are
+   excluded and logged. Necessary because the Diploma spans S2 2026 → S1 2028 while the
+   other documents carry no semester at all.
 2. **Co-teacher split** — `Graham Barber; Graham Barber; Anu Joshi` → distinct
    teachers, de-duplicated, with any embedded delivery mode stripped and captured
    (`Shaun Stummer Online` → *Shaun Stummer* / `VOFF`).
@@ -148,7 +151,8 @@ production interface.
 |-------|---------|
 | `source_file`, `src_table`, `src_row` | provenance back to the exact Word cell |
 | `class`, `qualification` | e.g. *Diploma … Fulltime VOFF*, `BSB50520` |
-| `semester` | `S2 2026`, `S1 2027`, … (parsed; filtered later) |
+| `semester` | `S2 2026`, `S1 2027`, … or empty when the document states none |
+| `semester_source` | `row` / `carried` / `inferred` / `assumed` / `unknown` — provenance of the above |
 | `day`, `channel_or_room` | weekday + channel/room token |
 | `time_start`, `time_end` | tolerant of `-`, `–`, am/pm, no-space |
 | `session_type` | Teaching / Tutorial Support / Self-directed learning |
@@ -209,7 +213,9 @@ Hrs/session, Contact hrs, Class, Delivery, Session type, Units, Co-teachers).
 |--------------------------------|----------|
 | Multiple units / teachers in one cell | preserve line breaks during extraction |
 | Merged Day/Time cells | carry-forward from the row above |
-| Header wording varies (*Day and Channel/Room/Day*) | match by **column position**, confirm by header |
+| Header wording varies (*Day and Channel/Room/Day*) | match by **header text**, fall back to position (+WARN) |
+| Extra / reordered columns | header-driven mapping; no fixed-width truncation |
+| Document states no semester at all | infer from filename/headings, else UNKNOWN + included in the built semester |
 | `Online`, `VOF` | normalise to `VOFF` |
 | Duplicated names, `and`/`;` separators | split + de-duplicate |
 | Same person, different spelling | fuzzy canonicalisation, ambiguity flagged |

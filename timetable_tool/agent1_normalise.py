@@ -48,6 +48,99 @@ UNIT_CODE_RE = re.compile(r"\b([A-Z]{3}[A-Z]{0,4}\d{3})\b")     # e.g. BSBINS516
 SEM_RE = re.compile(r"Sem(?:ester)?\s*([12])\s*(20\d{2})", re.I)
 QUAL_RE = re.compile(r"\b([A-Z]{2,4}\d{4,6})\b")                # e.g. ICT40120, BSB50520
 
+# ---------------------------------------------------------------------------
+# Document-level semester inference.
+#
+# Most source documents do NOT state their semester anywhere in the table (only
+# the combined Diploma does, in its Day cells). The semester therefore has to be
+# inferred from the filename / headings, e.g.:
+#     "BSB40720 Cert IV VOCF FTS1 2027"  -> S1 2027   (FTS1 = Fulltime Sem 1)
+#     "... Semester 2 2027 ..."           -> S2 2027
+# When nothing can be determined we record it as UNKNOWN and let the extraction
+# stage place the rows in whichever semester is being built. We must NEVER
+# silently stamp a hardcoded semester - doing so made whole files disappear
+# from any semester other than the hardcoded one.
+# ---------------------------------------------------------------------------
+DOC_SEM_PATTERNS = [
+    re.compile(r"Sem(?:ester)?\s*([12])\s*(20\d{2})", re.I),        # Semester 1 2027
+    re.compile(r"\bF\s*T\s*S\s*([12])\s*(20\d{2})\b", re.I),        # FTS1 2027
+    re.compile(r"\bS\s*([12])\s*(20\d{2})\b", re.I),                # S1 2027
+    re.compile(r"Sem(?:ester)?\s*([12])\s*'?(\d{2})\b", re.I),      # Semester 1 27
+    re.compile(r"\bF\s*T\s*S\s*([12])\s*'?(\d{2})\b", re.I),        # FTS1 27
+]
+
+
+def _norm_year(y):
+    """'2027' -> 2027;  '27' -> 2027."""
+    y = int(y)
+    return y if y >= 100 else 2000 + y
+
+
+def infer_doc_semester(fname, paras=()):
+    """Best-effort document-level semester label, e.g. 'S1 2027'.
+
+    Returns (label, basis) where basis explains where it came from, or
+    ('', '') when the document gives no usable semester at all.
+    Qualification codes (ICT40120, BSB50520) are stripped first so their
+    digits are never mistaken for a year or semester number.
+    """
+    stem = os.path.splitext(os.path.basename(fname))[0]
+    candidates = [("filename", stem)] + [("heading", p) for p in paras if p and p.strip()]
+    for basis, text in candidates:
+        clean = QUAL_RE.sub(" ", text.upper())          # drop ICT40120 / BSB50520 etc.
+        for pat in DOC_SEM_PATTERNS:
+            m = pat.search(clean)
+            if m:
+                return f"S{m.group(1)} {_norm_year(m.group(2))}", f"{basis}: '{text.strip()}'"
+    return "", ""
+
+
+# ---------------------------------------------------------------------------
+# Column mapping.
+#
+# Header wording varies between documents ("Day", "Day and Room",
+# "Day and Channel"; "Teacher" vs "Teachers"). Locate each column by its
+# header text and fall back to the historical fixed positions only for
+# columns we cannot identify. Relying on position alone silently dropped the
+# Teacher column whenever a document carried an extra/reordered column.
+# ---------------------------------------------------------------------------
+COLUMN_ALIASES = [
+    ("day",      ["day"]),
+    ("time",     ["time"]),
+    ("unit",     ["unit of competency", "unit", "units", "competency"]),
+    ("weeks",    ["week of study", "weeks", "week"]),
+    ("dates",    ["date of study", "dates", "date"]),
+    ("teachers", ["teachers", "teacher", "trainers", "trainer", "staff", "lecturer"]),
+]
+DEFAULT_POSITIONS = {"day": 0, "time": 1, "unit": 2, "weeks": 3, "dates": 4, "teachers": 5}
+
+
+def map_columns(header):
+    """Return (role->index, list_of_roles_that_fell_back_to_position).
+
+    `header` is a list of header-cell strings. Matching is case-insensitive
+    substring matching against COLUMN_ALIASES, longest alias first, and each
+    column index is claimed by at most one role.
+    """
+    norm = [re.sub(r"\s+", " ", (h or "")).strip().lower() for h in header]
+    colmap, taken = {}, set()
+    for role, aliases in COLUMN_ALIASES:
+        for alias in sorted(aliases, key=len, reverse=True):
+            hit = next((i for i, h in enumerate(norm)
+                        if i not in taken and h and alias in h), None)
+            if hit is not None:
+                colmap[role] = hit
+                taken.add(hit)
+                break
+    fell_back = []
+    for role, pos in DEFAULT_POSITIONS.items():
+        if role not in colmap:
+            if pos not in taken:
+                colmap[role] = pos
+                taken.add(pos)
+            fell_back.append(role)
+    return colmap, fell_back
+
 
 # ---------------------------------------------------------------------------
 # .docx reading (stdlib only), preserving line breaks within cells.
@@ -214,13 +307,25 @@ def split_units(lines):
     return units, notes, session_type
 
 
-def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
+def normalise_file(path, class_defs=None, assumed_semester=""):
     """Return (records, issues) for one .docx file.
     If class_defs is None, the classes are auto-detected from the document
-    (one table = one class, named from the preceding heading / qualification)."""
+    (one table = one class, named from the preceding heading / qualification).
+
+    `assumed_semester` is an optional explicit fallback for documents that state
+    no semester of their own. It defaults to empty: rows with no determinable
+    semester are marked UNKNOWN rather than being stamped with a guess, and the
+    extraction stage decides where they belong.
+    """
     fname = os.path.basename(path)
     records, issues = [], []
     tables = read_tables_with_headings(path)      # list of (rows, heading)
+
+    doc_paras = [t for k, t, _s in read_body(path) if k == "para" and t.strip()]
+    doc_sem, doc_sem_basis = infer_doc_semester(fname, doc_paras)
+    if doc_sem:
+        issues.append({"file": fname, "level": "INFO",
+                       "msg": f"Document semester inferred as {doc_sem} from {doc_sem_basis}."})
 
     if class_defs is None:
         class_defs = auto_class_defs(fname, tables)
@@ -236,12 +341,25 @@ def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
         cdef = class_defs[ti] if ti < len(class_defs) else {
             "class": f"{fname} (table {ti+1})", "qual": "", "delivery": ""}
         header = [" ".join(c).strip() for c in rows[0]] if rows else []
+        colmap, fell_back = map_columns(header)
+        if fell_back:
+            issues.append({"file": fname, "level": "WARN",
+                           "msg": f"[{cdef['class']}] could not identify column(s) "
+                                  f"{', '.join(sorted(fell_back))} from the header "
+                                  f"{header} - using default position(s). "
+                                  f"Check the document's column layout.",
+                           "class": cdef["class"], "src_table": ti + 1})
         last_day = ("", "", "")     # (day, sem, channel)
         last_sem = ""
         last_time_val = ("", "")
         for ri, row in enumerate(rows[1:], start=1):
-            cells = row + [[]] * (6 - len(row))          # pad to 6
-            day_cell, time_cell, unit_cell, week_cell, date_cell, teach_cell = cells[:6]
+            def cell(role):
+                """Cell lines for a logical column, located by header not position."""
+                i = colmap.get(role)
+                return row[i] if i is not None and i < len(row) else []
+
+            day_cell, time_cell, unit_cell = cell("day"), cell("time"), cell("unit")
+            week_cell, date_cell, teach_cell = cell("weeks"), cell("dates"), cell("teachers")
 
             day, sem, channel = parse_day_cell(day_cell)
             if not day and last_day[0]:                  # inherit merged day
@@ -251,7 +369,19 @@ def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
             if day or sem:
                 last_day = (day or last_day[0], sem or last_sem, channel or last_day[2])
                 last_sem = sem or last_sem
-            sem_out = sem or last_sem or (target_semester_default if cdef["qual"] != "BSB50520" else "")
+            # Semester precedence: stated in this row > carried from the row above
+            # > inferred for the whole document > explicit caller fallback.
+            # NEVER a hardcoded literal - see infer_doc_semester().
+            if sem:
+                sem_out, sem_src = sem, "row"
+            elif last_sem:
+                sem_out, sem_src = last_sem, "carried"
+            elif doc_sem:
+                sem_out, sem_src = doc_sem, "inferred"
+            elif assumed_semester:
+                sem_out, sem_src = assumed_semester, "assumed"
+            else:
+                sem_out, sem_src = "", "unknown"
 
             tstart, tend = parse_time(time_cell)
             if not tstart and last_time_val[0]:
@@ -281,6 +411,7 @@ def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
                 "class": cdef["class"],
                 "qualification": cdef["qual"],
                 "semester": sem_out,
+                "semester_source": sem_src,
                 "day": day,
                 "channel_or_room": channel,
                 "time_start": tstart,
@@ -313,7 +444,8 @@ def normalise_file(path, class_defs=None, target_semester_default="S2 2026"):
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
-FIELDS = ["source_file", "class", "qualification", "semester", "day", "channel_or_room",
+FIELDS = ["source_file", "class", "qualification", "semester", "semester_source",
+          "day", "channel_or_room",
           "time_start", "time_end", "session_type", "units", "unit_codes", "notes",
           "weeks_raw", "dates_raw", "teachers", "delivery", "src_table", "src_row"]
 
@@ -426,6 +558,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("folder")
     ap.add_argument("--out", default="output")
+    ap.add_argument("--assume-semester", default="",
+                    help="Semester to assume for documents that state none "
+                         "(e.g. 'S1 2027'). Left empty, such rows are marked "
+                         "UNKNOWN and included in whichever semester is built.")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -437,10 +573,12 @@ def main():
         fname = os.path.basename(path)
         low = fname.lower()
         cfg = next((defs for toks, defs in CLASS_CONFIG if all(t in low for t in toks)), None)
-        recs, iss = normalise_file(path, cfg)     # cfg=None -> auto-detect classes
+        recs, iss = normalise_file(path, cfg, args.assume_semester)
         all_records.extend(recs); all_issues.extend(iss)
         tag = "" if cfg else "  (auto-detected classes)"
+        sems = sorted({r["semester"] or "UNKNOWN" for r in recs})
         print(f"  {fname}: {len(recs)} session rows, {len(iss)} issue(s){tag}")
+        print(f"      semester(s): {', '.join(sems) if sems else '-'}")
 
     write_csv(os.path.join(args.out, "normalised_master.csv"), all_records)
     xlsx = write_xlsx(os.path.join(args.out, "normalised.xlsx"), all_records, all_issues)
@@ -449,6 +587,20 @@ def main():
     print("\n" + "=" * 70)
     print(f"TOTAL: {len(all_records)} normalised session rows across "
           f"{len({r['class'] for r in all_records})} classes")
+    unknown_sem = [r for r in all_records if not r["semester"]]
+    if unknown_sem:
+        files = sorted({r["source_file"] for r in unknown_sem})
+        print(f"\nROWS WITH NO STATED SEMESTER: {len(unknown_sem)} "
+              f"(across {len(files)} file(s))")
+        for f in files:
+            n = len([r for r in unknown_sem if r["source_file"] == f])
+            print(f"   - {f}: {n} row(s)")
+        print("   These are included in whichever semester you build "
+              "(use --assume-semester to pin them).")
+        all_issues.append({"file": ", ".join(files), "level": "SEMESTER-UNKNOWN",
+                           "msg": f"{len(unknown_sem)} row(s) state no semester; they will be "
+                                  f"included in whichever semester is extracted."})
+
     needs = [i for i in all_issues if i["level"] == "NEEDS-TEACHER"]
     print(f"\nSESSIONS WITH NO TEACHER (need confirmation): {len(needs)}")
     for i in needs:

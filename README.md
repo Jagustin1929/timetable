@@ -57,6 +57,25 @@ python3 timetable_tool/make_pdf.py --xlsx output/teacher_timetables_S2_2026.xlsx
 No external dependencies required (Excel is written with a stdlib fallback;
 `openpyxl` is used automatically if installed).
 
+## Semesters (important)
+
+Most timetable documents never state their semester — only the combined Diploma does
+(in its Day cells). The tool therefore determines the semester in this order:
+
+1. stated in the row itself (`Semester 1 2027`),
+2. carried forward from the row above (merged cells),
+3. **inferred from the filename/headings** (e.g. `... FTS1 2027` → `S1 2027`),
+4. an explicit `--assume-semester` you pass in,
+5. otherwise **UNKNOWN**.
+
+Rows that end up UNKNOWN are **included in whichever semester you build** and listed
+in the audit as `SEMESTER-ASSUMED`. Only rows that explicitly name a *different*
+semester are excluded (logged as `SEMESTER-EXCLUDED`).
+
+> Earlier versions stamped a hardcoded `S2 2026` on any document that stated no
+> semester. Building any other semester silently dropped those documents entirely —
+> and every teacher in them. Never reintroduce a hardcoded semester default.
+
 ## Conventions
 
 See `.kiro/steering/timetable-normalisation.md`:
