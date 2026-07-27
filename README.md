@@ -57,6 +57,62 @@ python3 timetable_tool/make_pdf.py --xlsx output/teacher_timetables_S2_2026.xlsx
 No external dependencies required (Excel is written with a stdlib fallback;
 `openpyxl` is used automatically if installed).
 
+## Uploading and revising timetables (web interface)
+
+Uploaded files are kept in `webapp_data/source_docs/`. **The `source_docs/` folder in the
+repository is never touched** — it stays as a reference copy.
+
+The upload page lists the timetables currently held and offers two choices:
+
+| Choice | Use when | Effect |
+|---|---|---|
+| **Add or update** | a revised timetable part-way through the semester | keeps everything already held; replaces only the classes you upload now |
+| **Start a fresh set** | beginning of a new semester | discards everything held, uses only what you upload |
+
+A revision supersedes the previous version **by class, not by filename**, so uploading
+`... combined 2.docx` correctly replaces `... combined.docx` instead of leaving both in
+place and double-counting every session. After each upload the app lists exactly what was
+added, updated, superseded, discarded or kept, so nothing changes silently.
+
+"Remove all" clears the held set.
+
+## Semesters (important)
+
+**The actual dates in the "Date of Study" column determine the semester and year.**
+That column is the authoritative source — filenames and headings are only fallbacks
+for rows that carry no usable date.
+
+Semester boundary: **months 1–6 → Semester 1, months 7–12 → Semester 2.**
+(Validated against every row in the source set that states its own semester: 47 agree,
+0 disagree.)
+
+Precedence:
+
+1. **dates in the Date of Study column** — authoritative,
+2. semester stated in the row itself (`Semester 1 2027`),
+3. carried forward from the row above (merged cells),
+4. carried from the preceding dated rows of the same table,
+5. inferred from the filename/headings (e.g. `... FTS1 2027` → `S1 2027`),
+6. an explicit `--assume-semester`,
+7. otherwise **UNKNOWN**.
+
+`semester_source` on every row records which of these was used, so the provenance is
+always auditable. Where a row *states* a semester that disagrees with its dates, the
+dates win and a `WARN` is raised. Rows whose dates span a semester boundary are filed
+under the earliest date and flagged.
+
+Date parsing handles the formats that occur in the real documents, including two dates
+run together with no separator (`27/10/20271/12/2027`). A **truncated** year
+(`03/12/202`) is rejected rather than read as year 2020, and raises a `WARN` naming the
+row so it can be fixed at source.
+
+Rows that end up UNKNOWN are **included in whichever semester you build** (logged as
+`SEMESTER-ASSUMED`) — never silently dropped.
+
+> Earlier versions stamped a hardcoded `S2 2026` on any document that stated no
+> semester. Building any other semester silently dropped those documents entirely —
+> and every teacher in them. Never reintroduce a hardcoded semester default.
+
 ## Conventions
 
 See `.kiro/steering/timetable-normalisation.md`:

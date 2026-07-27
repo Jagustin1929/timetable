@@ -23,12 +23,34 @@ def read_xlsx(path):
     return sheets
 
 
+def source_files_from_master(master_csv):
+    """List the actual source documents and the classes found in each.
+
+    Read from the normalised master rather than hardcoded, so the view always
+    reflects the documents that were really processed (previously this was a
+    fixed 2026 list and went stale as soon as new files were used).
+    """
+    import csv as _csv
+    from collections import OrderedDict
+    if not master_csv or not os.path.exists(master_csv):
+        return []
+    grouped = OrderedDict()
+    with open(master_csv, encoding="utf-8") as fh:
+        for r in _csv.DictReader(fh):
+            grouped.setdefault(r["source_file"], [])
+            if r["class"] not in grouped[r["source_file"]]:
+                grouped[r["source_file"]].append(r["class"])
+    return [{"name": name, "classes": classes} for name, classes in sorted(grouped.items())]
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--xlsx", default=XLSX, help="teacher timetables workbook to read")
     ap.add_argument("--dest", default=DEST, help="output HTML path")
     ap.add_argument("--semester", default="S2 2026", help="semester label")
+    ap.add_argument("--master", default=os.path.join(OUT, "normalised_master.csv"),
+                    help="normalised master CSV, used to list the real source documents")
     args = ap.parse_args()
     sh = read_xlsx(args.xlsx)
     non_teacher = {"Summary", "Reconciliation", "Clashes", "Unassigned sessions",
@@ -46,16 +68,7 @@ def main():
         hdr, *rows = sh[name]
         return [dict(zip(hdr, r)) for r in rows]
 
-    files = [
-        {"name": "BSB50520 Diploma Library Services combined.docx",
-         "classes": ["Diploma Library Services - PTE Evening",
-                     "Diploma Library Services - Face to Face",
-                     "Diploma Library Services - Fulltime VOFF"]},
-        {"name": "BSB40720 Cert IV VOCF FTS2 2026.docx", "classes": ["Cert IV VOCF"]},
-        {"name": "ICT40120 Cert IV Programming OUR.docx", "classes": ["Cert IV Programming"]},
-        {"name": "ICT30120 Cert III General VOF OUR.docx", "classes": ["Cert III General (VOFF)"]},
-        {"name": "ICT30120 Cert III General F2F OUR.docx", "classes": ["Cert III General (F2F)"]},
-    ]
+    files = source_files_from_master(args.master)
 
     data = {
         "semester": args.semester,

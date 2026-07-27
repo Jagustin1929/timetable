@@ -55,6 +55,96 @@ def run_normalise():
     return ok and os.path.exists(MASTER), "\n".join(log)
 
 
+def classes_in_docx(path):
+    """The set of class names a single .docx resolves to.
+
+    Used to supersede a previous version of a timetable even when the revision
+    arrives under a different filename ("... combined.docx" ->
+    "... combined 2.docx"). Matching on filename alone would leave the old file
+    in place and double-count every session in it.
+    """
+    sys.path.insert(0, TOOLS)
+    import agent1_normalise as a1
+    low = os.path.basename(path).lower()
+    cfg = next((defs for toks, defs in a1.CLASS_CONFIG if all(t in low for t in toks)), None)
+    try:
+        recs, _issues = a1.normalise_file(path, cfg)
+    except Exception:
+        return set()
+    return {r["class"] for r in recs if r.get("class")}
+
+
+def held_files():
+    """Timetables currently held, as [(filename, sorted_classes), ...]."""
+    os.makedirs(SRC, exist_ok=True)
+    out = []
+    for f in sorted(os.listdir(SRC)):
+        if f.lower().endswith(".docx") and not f.startswith("~$"):
+            out.append((f, sorted(classes_in_docx(os.path.join(SRC, f)))))
+    return out
+
+
+def apply_upload(docx, mode):
+    """Write uploaded files into the working folder.
+
+    mode "replace": start a clean set - discard everything held first.
+    mode "update":  keep the timetables already held, but supersede any whose
+                    classes the newly uploaded files also cover.
+
+    Returns a list of human-readable report lines.
+    """
+    import shutil, tempfile
+    os.makedirs(SRC, exist_ok=True)
+    report = []
+
+    if mode != "update":
+        existing = [f for f, _c in held_files()]
+        shutil.rmtree(SRC, ignore_errors=True)
+        os.makedirs(SRC, exist_ok=True)
+        for name, data in docx:
+            with open(os.path.join(SRC, name), "wb") as fh:
+                fh.write(data)
+        for name, _d in docx:
+            report.append(("added", name, ""))
+        for f in existing:
+            if f not in [n for n, _d in docx]:
+                report.append(("discarded", f, "replaced set"))
+        return report
+
+    # --- update mode -------------------------------------------------------
+    tmp = tempfile.mkdtemp()
+    try:
+        incoming = []
+        for name, data in docx:
+            p = os.path.join(tmp, name)
+            with open(p, "wb") as fh:
+                fh.write(data)
+            incoming.append((name, p, classes_in_docx(p)))
+
+        current = held_files()
+        new_names = {n for n, _p, _c in incoming}
+        new_classes = set().union(*[c for _n, _p, c in incoming]) if incoming else set()
+
+        for fname, classes in current:
+            if fname in new_names:
+                continue                      # same filename -> overwritten below
+            if classes and new_classes and set(classes) & new_classes:
+                os.remove(os.path.join(SRC, fname))
+                report.append(("superseded", fname,
+                               "same class(es) as an uploaded file: "
+                               + ", ".join(sorted(set(classes) & new_classes))))
+            else:
+                report.append(("kept", fname, ", ".join(classes)))
+
+        for name, p, _c in incoming:
+            verb = "updated" if name in {f for f, _c in current} else "added"
+            shutil.copyfile(p, os.path.join(SRC, name))
+            report.append((verb, name, ""))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return report
+
+
 def _sem_key(label):
     m = re.search(r"S\s*([12])\s*(\d{4})", label)
     return (int(m.group(2)), int(m.group(1))) if m else (9999, 9)
@@ -64,9 +154,12 @@ def analyze_data():
     rows = list(csv.DictReader(open(MASTER, encoding="utf-8")))
     sem_counts = Counter(r["semester"].strip() for r in rows if r["semester"].strip())
     semesters = sorted(sem_counts.items(), key=lambda kv: _sem_key(kv[0]))
-    default = sem_counts.most_common(1)[0][0] if sem_counts else "S2 2026"
+    default = sem_counts.most_common(1)[0][0] if sem_counts else ""
     classes = sorted(Counter(r["class"] for r in rows).items())
-    return semesters, default, classes
+    # Rows whose document never stated a semester. These are included in
+    # whichever semester is built, so the user needs to see them.
+    undated = Counter(r["source_file"] for r in rows if not r["semester"].strip())
+    return semesters, default, classes, undated
 
 
 def run_extract(semester):
@@ -80,7 +173,8 @@ def run_extract(semester):
     if ok:
         _run("Build results view",
              [PY, os.path.join(TOOLS, "build_prototype.py"),
-              "--xlsx", tt_xlsx, "--dest", RESULTS_HTML, "--semester", semester], log)
+              "--xlsx", tt_xlsx, "--dest", RESULTS_HTML, "--semester", semester,
+              "--master", MASTER], log)
         _run("Render PDF timetables",
              [PY, os.path.join(TOOLS, "make_pdf.py"),
               "--xlsx", tt_xlsx, "--dest", tt_pdf, "--semester", semester], log)
@@ -141,34 +235,104 @@ def page(body):
 
 
 def upload_form():
-    return page("""
+    held = held_files()
+    if held:
+        rows = "".join(
+            f"<li><b>{f}</b>"
+            + (f" <span class='hint' style='margin:0'>&rarr; {', '.join(c)}</span>" if c else "")
+            + "</li>" for f, c in held)
+        current = f"""
+      <div class="card">
+        <label>Timetables currently held ({len(held)})</label>
+        <ul class="cls">{rows}</ul>
+        <div class="hint">Uploading a revised copy of any of these replaces it -
+        including when the revision has a different filename, as long as it covers
+        the same class.</div>
+        <div style="margin-top:12px">
+          <a class="dl sec" href="/clear" onclick="return confirm('Remove all held timetables?')">Remove all</a>
+        </div>
+      </div>"""
+        mode_choice = """
+        <label style="margin-top:18px">What should happen to the timetables already held?</label>
+        <label style="font-weight:400;display:block;margin:6px 0">
+          <input type="radio" name="mode" value="update" checked>
+          <b>Add or update</b> &mdash; keep the others, replace only what I upload now
+          <span class="hint" style="margin:0 0 0 22px;display:block">Use this for a revised
+          timetable part-way through the semester.</span>
+        </label>
+        <label style="font-weight:400;display:block;margin:6px 0">
+          <input type="radio" name="mode" value="replace">
+          <b>Start a fresh set</b> &mdash; discard everything held and use only what I upload now
+          <span class="hint" style="margin:0 0 0 22px;display:block">Use this at the start of a
+          new semester.</span>
+        </label>"""
+        sub = "Upload a revised timetable, or start a fresh set for a new semester."
+    else:
+        current = ""
+        mode_choice = '<input type="hidden" name="mode" value="replace">'
+        sub = "Upload your class-timetable Word files to begin."
+
+    return page(f"""
       <h1>Teacher Timetable Builder</h1>
-      <p class="sub">Upload your class-timetable Word files to begin.</p>
+      <p class="sub">{sub}</p>
+      {current}
       <form class="card" method="POST" action="/analyze" enctype="multipart/form-data">
         <div class="drop">
           <div>Choose the class-timetable <b>.docx</b> files (you can select several at once)</div>
           <input type="file" name="files" accept=".docx" multiple required>
         </div>
-        <button type="submit">Continue &rarr;</button>
+        {mode_choice}
+        <div style="margin-top:16px"><button type="submit">Continue &rarr;</button></div>
         <div class="hint">Runs entirely on your computer. Nothing is uploaded or installed.</div>
       </form>""")
 
 
-def choose_page(semesters, default, classes):
+def upload_report_html(report):
+    """Summarise what the upload changed, so nothing is replaced silently."""
+    if not report:
+        return ""
+    order = {"added": 0, "updated": 1, "superseded": 2, "discarded": 3, "kept": 4}
+    colour = {"added": "var(--ok)", "updated": "var(--ok)",
+              "superseded": "var(--warn)", "discarded": "var(--warn)", "kept": "var(--mut)"}
+    def row_html(verb, name, detail):
+        col = colour.get(verb, "var(--ink)")
+        extra = f" <span class='hint' style='margin:0'>({detail})</span>" if detail else ""
+        return (f"<li><span style='color:{col};font-weight:600'>{verb}</span> "
+                f"{name}{extra}</li>")
+
+    items = "".join(row_html(v, n, d) for v, n, d
+                    in sorted(report, key=lambda r: (order.get(r[0], 9), r[1])))
+    return f"""<div class="card"><label>Files used for this build</label>
+      <ul class="cls">{items}</ul></div>"""
+
+
+def choose_page(semesters, default, classes, undated=None, report=None):
     opts = "".join(
         f'<option value="{urllib.parse.quote(s)}"{" selected" if s == default else ""}>{s} ({n} sessions)</option>'
         for s, n in semesters)
     cls = "".join(f"<li>{c} <span class='hint'>({n})</span></li>" for c, n in classes)
+    undated = undated or {}
+    if undated:
+        items = "".join(f"<li>{f} <span class='hint'>({n} sessions)</span></li>"
+                        for f, n in sorted(undated.items()))
+        note = (f"""<div class="card"><label>Documents that do not state a semester</label>
+        <p class="sub">These {sum(undated.values())} session(s) will be included in whichever
+        semester you choose above, because the document itself gives no semester.</p>
+        <ul class="cls">{items}</ul></div>""")
+    else:
+        note = ""
     return page(f"""
       <h1>Choose semester <span class="tag">step 2 of 2</span></h1>
       <p class="sub">Detected {len(classes)} class(es) across your files. Pick the semester to build.</p>
       <form class="card" method="POST" action="/generate">
         <label>Semester</label>
-        <select name="semester">{opts or '<option>S2 2026</option>'}</select>
+        <select name="semester">{opts or '<option>(none detected)</option>'}</select>
         <div style="margin-top:16px"><button type="submit">Generate teacher timetables</button>
         <a class="dl sec" href="/" style="margin-left:8px">&#8617; Start over</a></div>
       </form>
-      <div class="card"><label>Classes detected</label><ul class="cls">{cls}</ul></div>""")
+      {note}
+      <div class="card"><label>Classes detected</label><ul class="cls">{cls}</ul></div>
+      {upload_report_html(report)}""")
 
 
 def results_page(semester, xlsx_name, pdf_name, log):
@@ -206,10 +370,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _clear_held(self):
+        import shutil
+        shutil.rmtree(SRC, ignore_errors=True)
+        os.makedirs(SRC, exist_ok=True)
+        for f in (MASTER, RESULTS_HTML):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         if u.path == "/":
             self._send(200, upload_form())
+        elif u.path == "/clear":
+            self._clear_held()
+            self._send(303, "", extra={"Location": "/"})
         elif u.path == "/view":
             if os.path.exists(RESULTS_HTML):
                 self._send(200, open(RESULTS_HTML, "rb").read())
@@ -256,18 +433,15 @@ class Handler(BaseHTTPRequestHandler):
             if not docx:
                 self._send(400, page("<div class='card err'><b>No .docx files received.</b> "
                                      "<a href='/'>Try again</a>.</div>")); return
-            import shutil
-            shutil.rmtree(SRC, ignore_errors=True); os.makedirs(SRC, exist_ok=True)
-            for name, data in docx:
-                with open(os.path.join(SRC, name), "wb") as fh:
-                    fh.write(data)
+            mode = (fields.get("mode") or "replace").strip()
+            report = apply_upload(docx, mode)
             ok, log = run_normalise()
             if not ok:
                 self._send(200, page(f"<div class='card err'><b>Could not read the documents.</b> "
                                      f"<a href='/'>Start over</a></div>"
                                      f"<div class='card'><pre>{log}</pre></div>")); return
-            semesters, default, classes = analyze_data()
-            self._send(200, choose_page(semesters, default, classes))
+            semesters, default, classes, undated = analyze_data()
+            self._send(200, choose_page(semesters, default, classes, undated, report))
         elif path == "/generate":
             if not os.path.exists(MASTER):
                 self._send(303, "", extra={"Location": "/"}); return
