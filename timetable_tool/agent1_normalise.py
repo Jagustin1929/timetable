@@ -21,6 +21,7 @@ Usage:
 
 import sys, os, re, csv, zipfile, argparse
 import xml.etree.ElementTree as ET
+from collections import Counter
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -29,6 +30,16 @@ W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # The combined Diploma has 3 classes (one per table, in order).
 # Matching is by qualification code + a distinguishing token so the odd
 # filenames (double spaces, "(1)", VOF vs F2F) still resolve.
+#
+# A config entry is only a STARTING POINT. A document may carry more tables than
+# the entry lists - e.g. the ICT40120 Cert IV file became a "combined" file
+# holding one table per course stream (Programming, AI, Data). The number of
+# classes is therefore always taken from the document itself, never from this
+# list; see resolve_class_defs().
+#
+# `stream` names the course stream an entry represents, so the qualification
+# LEVEL prefix can be recovered from it ("Cert IV Programming" - "Programming"
+# => "Cert IV") and reused to name the other streams identically.
 # ---------------------------------------------------------------------------
 CLASS_CONFIG = [
     # (match tokens (all must appear, case-insensitive), [class defs by table order])
@@ -38,10 +49,21 @@ CLASS_CONFIG = [
         {"class": "Diploma Library Services - Fulltime VOFF",   "qual": "BSB50520", "delivery": "VOFF"},
     ]),
     (["bsb40720"],            [{"class": "Cert IV VOCF",                "qual": "BSB40720", "delivery": ""}]),
-    (["ict40120"],            [{"class": "Cert IV Programming",         "qual": "ICT40120", "delivery": ""}]),
+    (["ict40120"],            [{"class": "Cert IV Programming",         "qual": "ICT40120", "delivery": "",
+                                "stream": "Programming"}]),
     (["ict30120", "vof"],     [{"class": "Cert III General (VOFF)",     "qual": "ICT30120", "delivery": "VOFF"}]),
     (["ict30120", "f2f"],     [{"class": "Cert III General (F2F)",      "qual": "ICT30120", "delivery": "F2F"}]),
 ]
+
+
+def config_for(fname):
+    """The CLASS_CONFIG entry for a filename, or None.
+
+    Single place that resolves a document to its configured classes, so callers
+    (the CLI and the webapp) cannot drift apart in how they match.
+    """
+    low = os.path.basename(fname).lower()
+    return next((defs for toks, defs in CLASS_CONFIG if all(t in low for t in toks)), None)
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 UNIT_CODE_RE = re.compile(r"\b([A-Z]{3}[A-Z]{0,4}\d{3})\b")     # e.g. BSBINS516, ICTPRG440, TAEDEL301
@@ -293,21 +315,25 @@ def read_tables_with_headings(path):
     return tables
 
 
+def file_mode(fname):
+    """Delivery mode stated by a FILENAME, or '' when it names none."""
+    low = os.path.basename(fname).lower()
+    if "f2f" in low or "face to face" in low:
+        return "F2F"
+    if "voff" in low or re.search(r"\bvof\b", low) or "online" in low:
+        return "VOFF"
+    if "evening" in low or "evng" in low:
+        return "Evening"
+    return ""
+
+
 def auto_class_defs(fname, tables):
     """Derive class definitions from the filename + per-table headings when no
     explicit CLASS_CONFIG entry matches, so any new document 'just works'."""
     stem = os.path.splitext(fname)[0]
     qm = QUAL_RE.search(stem.upper())
     qual = qm.group(1) if qm else ""
-    low = fname.lower()
-    if "f2f" in low or "face to face" in low:
-        mode = "F2F"
-    elif "voff" in low or re.search(r"\bvof\b", low) or "online" in low:
-        mode = "VOFF"
-    elif "evening" in low or "evng" in low:
-        mode = "Evening"
-    else:
-        mode = ""
+    mode = file_mode(fname)
     multi = len(tables) > 1
     defs = []
     for i, (_rows, heading) in enumerate(tables):
@@ -318,6 +344,245 @@ def auto_class_defs(fname, tables):
             name = f"{name} ({mode})"
         defs.append({"class": name[:80].strip(), "qual": qual, "delivery": mode})
     return defs
+
+
+# ---------------------------------------------------------------------------
+# Course streams within one qualification.
+#
+# One qualification is often delivered as several parallel courses ("streams" /
+# specialisations). They arrive either as one document per stream, or as a single
+# "combined" document holding ONE TABLE PER STREAM, each introduced by a heading
+# that labels the stream - e.g. the ICT40120 Cert IV file carries Programming,
+# AI and Data.
+#
+# Two rules matter:
+#   1. The number of classes comes from the DOCUMENT, never from CLASS_CONFIG.
+#      A combined file with 3 tables must yield 3 classes; anything else buries
+#      two whole courses under a class named after the file.
+#   2. A stream must produce the SAME class name whether it arrived standalone or
+#      inside a combined file. The webapp supersedes old uploads by class
+#      identity, so "Cert IV Programming" arriving as "ICT40120 ... Programming"
+#      must still be called "Cert IV Programming" inside the combined document -
+#      otherwise the old file is kept and every Programming session is counted
+#      twice.
+#
+# ADDING A NEW STREAM: add one line to STREAM_ALIASES (and optionally its unit
+# prefix to STREAM_UNIT_PREFIXES). Nothing else needs to change.
+# ---------------------------------------------------------------------------
+STREAM_ALIASES = [
+    # (canonical stream name, phrases that identify it; matched on word boundaries)
+    ("Programming",     ["programming", "software development", "coding"]),
+    ("AI",              ["ai", "artificial intelligence", "machine learning"]),
+    ("Data",            ["data", "data analytics", "data engineering",
+                         "database", "databases", "data science"]),
+    ("Networking",      ["networking", "network engineering", "networks"]),
+    ("Cyber Security",  ["cyber", "cyber security", "cybersecurity", "information security"]),
+    ("Web Development", ["web", "web development", "web dev", "front end web"]),
+    ("Systems Admin",   ["systems administration", "system administration", "sysadmin"]),
+    ("Cloud",           ["cloud", "cloud computing"]),
+    ("Gaming",          ["gaming", "game development", "games"]),
+    ("Digital Media",   ["digital media", "multimedia"]),
+    ("General",         ["general"]),
+]
+
+# Unit-code prefixes that indicate a stream. Used only as a BACKSTOP when the
+# heading above a table does not name the stream. Core units shared by every
+# stream (ICTICT, BSBXCS, BSBCRT, ...) are deliberately absent, and a winner
+# needs a clear majority - a stream's own units always dominate its table.
+STREAM_UNIT_PREFIXES = {
+    "ICTPRG": "Programming",
+    "ICTAII": "AI",
+    "ICTDAT": "Data",
+    "ICTDBS": "Data",
+    "ICTNWK": "Networking",
+    "ICTCYS": "Cyber Security",
+    "ICTWEB": "Web Development",
+    "ICTSAS": "Systems Admin",
+    "ICTCLD": "Cloud",
+    "ICTGAM": "Gaming",
+    "ICTDMT": "Digital Media",
+}
+
+# AQF level from the first digit of a national code's numeric part
+# (ICT40120 -> 4 -> Cert IV, BSB50520 -> 5 -> Diploma).
+AQF_LEVELS = {"1": "Cert I", "2": "Cert II", "3": "Cert III", "4": "Cert IV",
+              "5": "Diploma", "6": "Advanced Diploma"}
+LEVEL_LABEL_RE = re.compile(
+    r"\b(advanced\s+diploma|diploma|cert(?:ificate)?\s*(?:iv|iii|ii|i|[1-4]))\b", re.I)
+ROMAN = {"1": "I", "2": "II", "3": "III", "4": "IV"}
+
+
+def qualification_base_label(fname, qual=""):
+    """The qualification LEVEL label, e.g. 'Cert IV', used as the prefix of every
+    stream class name so the same stream is named identically wherever it lives.
+
+    Read from the filename ("... Cert IV Information Technology combined") and,
+    failing that, from the AQF level encoded in the national code.
+    """
+    stem = os.path.splitext(os.path.basename(fname))[0]
+    m = LEVEL_LABEL_RE.search(stem)
+    if m:
+        raw = re.sub(r"\s+", " ", m.group(1)).strip().lower()
+        if raw.startswith("advanced"):
+            return "Advanced Diploma"
+        if raw.startswith("diploma"):
+            return "Diploma"
+        lvl = raw.split()[-1].replace("certificate", "").replace("cert", "").strip()
+        return f"Cert {ROMAN.get(lvl, lvl.upper())}"
+    m = re.match(r"[A-Z]{2,4}(\d)", (qual or "").upper())
+    if m:
+        return AQF_LEVELS.get(m.group(1), "")
+    return ""
+
+
+def _streams_in_text(text):
+    """[(stream, matched_phrase)] for every stream named in `text`, longest
+    (most specific) match first. Word-boundary matched, so 'Date of Study' never
+    reads as the Data stream and 'Website' never as Web."""
+    low = re.sub(r"\s+", " ", (text or "")).lower()
+    hits = []
+    for stream, aliases in STREAM_ALIASES:
+        best = ""
+        for alias in aliases:
+            if re.search(r"\b" + re.escape(alias) + r"\b", low) and len(alias) > len(best):
+                best = alias
+        if best:
+            hits.append((stream, best))
+    hits.sort(key=lambda h: len(h[1]), reverse=True)
+    return hits
+
+
+def _stream_from_units(rows):
+    """Backstop: infer a table's stream from the units it actually teaches.
+    Requires a clear majority so a single shared unit cannot decide it."""
+    counts = Counter()
+    for row in rows:
+        for cell in row:
+            for code in UNIT_CODE_RE.findall(" ".join(cell)):
+                prefix = re.match(r"[A-Z]+", code).group(0)
+                if prefix in STREAM_UNIT_PREFIXES:
+                    counts[STREAM_UNIT_PREFIXES[prefix]] += 1
+    if not counts:
+        return "", ""
+    ranked = counts.most_common()
+    top, n = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else 0
+    if n >= 2 and n >= 2 * max(runner_up, 1):
+        return top, f"unit codes ({n} {top} unit reference(s))"
+    return "", ""
+
+
+def detect_stream(heading, rows):
+    """Identify the course stream one table belongs to.
+
+    Returns (stream, basis, also_matched) where `also_matched` lists any other
+    streams the heading mentioned, so an ambiguous heading is flagged rather
+    than quietly resolved one way.
+
+    Signals, strongest first:
+      1. the heading paragraph above the table (how the source labels streams),
+      2. a title row inside the table,
+      3. the unit codes being taught.
+    """
+    hits = _streams_in_text(heading)
+    if hits:
+        return hits[0][0], f"heading: '{(heading or '').strip()[:60]}'", [s for s, _a in hits[1:]]
+
+    for row in rows[:2]:                      # a merged title row above the header
+        text = " ".join(" ".join(c) for c in row)
+        hits = _streams_in_text(text)
+        if hits and len(row) <= 2:            # a real title row, not the column headers
+            return hits[0][0], f"table title row: '{text.strip()[:60]}'", [s for s, _a in hits[1:]]
+
+    stream, basis = _stream_from_units(rows)
+    return stream, basis, []
+
+
+def resolve_class_defs(fname, tables, cfg):
+    """Decide the class definition for EVERY table in a document.
+
+    The document is the authority on how many classes it holds. Three shapes are
+    handled:
+      * the config already describes every table (single-class files, and the
+        configured combined Diploma cohorts)      -> use it unchanged
+      * a combined file whose tables are course STREAMS of one qualification
+        (ICT40120: Programming / AI / Data)       -> name each from its heading
+      * anything else                             -> fall back to auto-detection
+
+    Returns (defs, issues).
+    """
+    issues = []
+    qm = QUAL_RE.search(os.path.splitext(os.path.basename(fname))[0].upper())
+    qual = (cfg[0].get("qual") if cfg else "") or (qm.group(1) if qm else "")
+
+    # 1. Config matches the document exactly - nothing to work out.
+    if cfg and len(cfg) == len(tables):
+        return [dict(d) for d in cfg], issues
+
+    detected = [detect_stream(heading, rows) for rows, heading in tables]
+    n_named = sum(1 for s, _b, _o in detected if s)
+
+    # 2. Not a stream document - keep the historical behaviour and say so.
+    if len(tables) < 2 or n_named == 0:
+        if cfg:
+            issues.append({"file": fname, "level": "WARN",
+                           "msg": f"Expected {len(cfg)} table(s) for the configured classes "
+                                  f"but found {len(tables)}, and no course stream could be "
+                                  f"identified from the table headings. Falling back to "
+                                  f"auto-detected class names - check the document structure."})
+        return auto_class_defs(fname, tables), issues
+
+    # 3. A combined, multi-stream document. Prefix every class with the
+    #    qualification level so a stream is named identically wherever it lives.
+    base = ""
+    if cfg and cfg[0].get("stream") and cfg[0].get("class"):
+        base = re.sub(r"\b" + re.escape(cfg[0]["stream"]) + r"\b", "",
+                      cfg[0]["class"], flags=re.I).strip(" -")
+    base = base or qualification_base_label(fname, qual) or qual or "Course"
+
+    doc_mode = file_mode(fname)
+    defs, used = [], {}
+    for ti, ((rows, heading), (stream, basis, also)) in enumerate(zip(tables, detected)):
+        if stream:
+            name = f"{base} {stream}".strip()
+        elif cfg and ti < len(cfg):
+            name, basis = cfg[ti]["class"], "class configuration"
+        else:
+            name, basis = f"{base} Course {ti + 1}".strip(), "position in document"
+            issues.append({"file": fname, "level": "WARN",
+                           "msg": f"Table {ti + 1} does not name a course stream in its "
+                                  f"heading ({heading.strip()[:60]!r}) and its units do not "
+                                  f"identify one; it was named '{name}'. Add the stream to "
+                                  f"the heading, or to STREAM_ALIASES, to name it properly."})
+
+        # Per-table delivery mode: the heading may override the filename.
+        modes = norm_mode_token(heading) or ({doc_mode} if doc_mode else set())
+        mode = "/".join(sorted(modes)) if modes else ""
+        if mode and mode.lower() not in name.lower():
+            name = f"{name} ({mode})"
+
+        # Two tables resolving to one name would silently merge two courses.
+        if name in used:
+            issues.append({"file": fname, "level": "WARN",
+                           "msg": f"Tables {used[name]} and {ti + 1} both resolve to the class "
+                                  f"'{name}'. They are kept apart as separate classes - check "
+                                  f"whether their headings really describe different courses."})
+            name = f"{name} #{ti + 1}"
+        used[name] = ti + 1
+
+        if also:
+            issues.append({"file": fname, "level": "WARN",
+                           "msg": f"Table {ti + 1} heading ({heading.strip()[:60]!r}) mentions "
+                                  f"more than one course stream ({stream}, {', '.join(also)}); "
+                                  f"used '{stream}'. Check the heading if that is wrong."})
+
+        defs.append({"class": name[:80].strip(), "qual": qual, "delivery": mode,
+                     "stream": stream, "stream_basis": basis})
+
+    issues.append({"file": fname, "level": "INFO",
+                   "msg": f"Combined document: {len(defs)} course stream(s) detected - "
+                          + "; ".join(f"{d['class']} (from {d['stream_basis']})" for d in defs)})
+    return defs, issues
 
 
 # ---------------------------------------------------------------------------
@@ -422,15 +687,15 @@ def normalise_file(path, class_defs=None, assumed_semester=""):
                                   f"from {doc_year_basis}. Rows will be included in any "
                                   f"{doc_year} semester."})
 
-    if class_defs is None:
-        class_defs = auto_class_defs(fname, tables)
+    # The document decides how many classes it holds - a "combined" file carries
+    # one table per course stream and must yield one class each.
+    configured = class_defs
+    class_defs, class_issues = resolve_class_defs(fname, tables, class_defs)
+    issues.extend(class_issues)
+    if configured is None:
         issues.append({"file": fname, "level": "INFO",
                        "msg": f"Auto-detected {len(class_defs)} class(es): "
                               + "; ".join(d["class"] for d in class_defs)})
-    elif len(tables) != len(class_defs):
-        issues.append({"file": fname, "level": "WARN",
-                       "msg": f"Expected {len(class_defs)} table(s) for configured classes "
-                              f"but found {len(tables)}. Check class config / document structure."})
 
     for ti, (rows, _heading) in enumerate(tables):
         cdef = class_defs[ti] if ti < len(class_defs) else {
@@ -698,13 +963,14 @@ def main():
     all_records, all_issues = [], []
     for path in docs:
         fname = os.path.basename(path)
-        low = fname.lower()
-        cfg = next((defs for toks, defs in CLASS_CONFIG if all(t in low for t in toks)), None)
+        cfg = config_for(fname)
         recs, iss = normalise_file(path, cfg, args.assume_semester)
         all_records.extend(recs); all_issues.extend(iss)
         tag = "" if cfg else "  (auto-detected classes)"
         sems = sorted({r["semester"] or "UNKNOWN" for r in recs})
+        classes = sorted({r["class"] for r in recs})
         print(f"  {fname}: {len(recs)} session rows, {len(iss)} issue(s){tag}")
+        print(f"      class(es):   {', '.join(classes) if classes else '-'}")
         print(f"      semester(s): {', '.join(sems) if sems else '-'}")
 
     write_csv(os.path.join(args.out, "normalised_master.csv"), all_records)

@@ -62,13 +62,15 @@ def classes_in_docx(path):
     arrives under a different filename ("... combined.docx" ->
     "... combined 2.docx"). Matching on filename alone would leave the old file
     in place and double-count every session in it.
+
+    A combined multi-course file returns one class per course stream, so uploading
+    "ICT40120 Cert IV ... combined.docx" supersedes the older per-stream file
+    ("... Programming OUR.docx") on the strength of the shared class name.
     """
     sys.path.insert(0, TOOLS)
     import agent1_normalise as a1
-    low = os.path.basename(path).lower()
-    cfg = next((defs for toks, defs in a1.CLASS_CONFIG if all(t in low for t in toks)), None)
     try:
-        recs, _issues = a1.normalise_file(path, cfg)
+        recs, _issues = a1.normalise_file(path, a1.config_for(path))
     except Exception:
         return set()
     return {r["class"] for r in recs if r.get("class")}

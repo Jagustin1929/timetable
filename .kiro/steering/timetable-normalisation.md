@@ -22,7 +22,7 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - **Every merge decision is recorded in the audit log**, and where a short/partial name could
   match **more than one** full name, the tool pauses/flags for confirmation rather than guessing.
 
-## Source files → classes (7 classes across 5 files)
+## Source files → classes
 
 | Source file                             | Class (own sheet)                              | Delivery |
 |-----------------------------------------|------------------------------------------------|----------|
@@ -30,7 +30,7 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 | BSB50520 Diploma Library Services combined | Diploma Library Services — Face to Face     | F2F      |
 | BSB50520 Diploma Library Services combined | Diploma Library Services — Fulltime VOFF    | VOFF     |
 | BSB40720 Cert IV VOCF FTS2 2026         | Cert IV VOCF                                   | —        |
-| ICT40120 Cert IV Programming OUR        | Cert IV Programming                            | —        |
+| ICT40120 Cert IV ... (combined)         | Cert IV Programming / Cert IV AI / Cert IV Data | —       |
 | ICT30120 Cert III General VOF OUR       | Cert III General (online)                      | VOFF     |
 | ICT30120 Cert III General F2F OUR       | Cert III General (face-to-face)                | F2F      |
 
@@ -38,6 +38,31 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
   PTE Evening → Diploma Face to Face → Diploma Fulltime VOFF.
 - The two **ICT30120** files are separate classes (not duplicates); a teacher may legitimately
   appear in both.
+
+## Combined multi-course documents
+
+- **The document decides how many classes it holds — never `CLASS_CONFIG`.** A combined
+  file gains and loses course streams over time; a config entry is a naming hint only.
+  Burying extra tables under one class name silently loses whole courses.
+- One qualification may be delivered as several parallel **course streams**
+  (ICT40120 → Programming, AI, Data). These arrive either as one file per stream or as
+  one combined file with **one table per stream, under a heading naming the stream**.
+- A stream **MUST produce the same class name whether it arrived standalone or combined**
+  (`Cert IV Programming` either way). Class names are therefore built as
+  `<qualification level> <stream>` — the level from the filename (`Cert IV`) or the AQF
+  digit in the national code (`ICT40120` → 4 → `Cert IV`). If the names differ, uploads
+  cannot supersede by class identity and every session is counted twice.
+- Stream identification order: heading above the table → title row inside the table →
+  unit-code prefixes taught (`ICTPRG`→Programming, `ICTAII`→AI, `ICTDBS`/`ICTDAT`→Data).
+  Core units shared by all streams (`ICTICT`, `BSBXCS`, `BSBCRT`) must never decide it,
+  and the winner needs a clear majority.
+- **Adding a stream = one line in `STREAM_ALIASES`** (optionally its unit prefix in
+  `STREAM_UNIT_PREFIXES`). No other change should be needed.
+- Never silently merge two tables into one class: if two tables resolve to the same
+  name, keep them separate and `WARN`. If a table's stream cannot be identified, name it
+  by position and `WARN` — do not fold it into a neighbouring class.
+- Match text for stream names on **word boundaries**, so `Date of Study` never reads as
+  the Data stream and `Website` never as Web.
 
 ## Semester determination
 
