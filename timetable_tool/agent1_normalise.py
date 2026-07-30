@@ -369,6 +369,9 @@ def auto_class_defs(fname, tables):
 # ADDING A NEW STREAM: add one line to STREAM_ALIASES (and optionally its unit
 # prefix to STREAM_UNIT_PREFIXES). Nothing else needs to change.
 # ---------------------------------------------------------------------------
+# Declaration order is also the CANONICAL ORDER of a combined name: a course
+# taught as "Data/AI", "AI and Data" or "AI/Data" always comes out as "AI/Data",
+# so a re-worded heading in the next revision cannot invent a second class.
 STREAM_ALIASES = [
     # (canonical stream name, phrases that identify it; matched on word boundaries)
     ("Programming",     ["programming", "software development", "coding"]),
@@ -382,8 +385,21 @@ STREAM_ALIASES = [
     ("Cloud",           ["cloud", "cloud computing"]),
     ("Gaming",          ["gaming", "game development", "games"]),
     ("Digital Media",   ["digital media", "multimedia"]),
-    ("General",         ["general"]),
 ]
+STREAM_ORDER = {name: i for i, (name, _aliases) in enumerate(STREAM_ALIASES)}
+
+
+def compose_stream(streams):
+    """Join the subjects one course covers into a single canonical name.
+
+    A course may cover more than one subject - ICT40120 is delivered as
+    Programming and AI/Data, two courses, not three. Whenever a table names
+    several subjects they describe ONE course, so they are joined rather than
+    treated as a conflict. Canonical order keeps the name stable however the
+    heading happens to be worded.
+    """
+    return "/".join(sorted(set(s for s in streams if s),
+                           key=lambda s: STREAM_ORDER.get(s, 99)))
 
 # Unit-code prefixes that indicate a stream. Used only as a BACKSTOP when the
 # heading above a table does not name the stream. Core units shared by every
@@ -436,25 +452,20 @@ def qualification_base_label(fname, qual=""):
 
 
 def _streams_in_text(text):
-    """[(stream, matched_phrase)] for every stream named in `text`, longest
-    (most specific) match first. Word-boundary matched, so 'Date of Study' never
-    reads as the Data stream and 'Website' never as Web."""
+    """Every subject named in `text`. Word-boundary matched, so 'Date of Study'
+    never reads as the Data subject and 'Website' never as Web."""
     low = re.sub(r"\s+", " ", (text or "")).lower()
-    hits = []
-    for stream, aliases in STREAM_ALIASES:
-        best = ""
-        for alias in aliases:
-            if re.search(r"\b" + re.escape(alias) + r"\b", low) and len(alias) > len(best):
-                best = alias
-        if best:
-            hits.append((stream, best))
-    hits.sort(key=lambda h: len(h[1]), reverse=True)
-    return hits
+    return [stream for stream, aliases in STREAM_ALIASES
+            if any(re.search(r"\b" + re.escape(a) + r"\b", low) for a in aliases)]
 
 
 def _stream_from_units(rows):
-    """Backstop: infer a table's stream from the units it actually teaches.
-    Requires a clear majority so a single shared unit cannot decide it."""
+    """Backstop: infer a table's course from the units it actually teaches.
+
+    A subject needs a real presence to count, so a single shared support unit
+    cannot invent a course. Where two subjects are BOTH strongly represented the
+    table is one combined course (AI/Data) and both are kept.
+    """
     counts = Counter()
     for row in rows:
         for cell in row:
@@ -464,38 +475,38 @@ def _stream_from_units(rows):
                     counts[STREAM_UNIT_PREFIXES[prefix]] += 1
     if not counts:
         return "", ""
-    ranked = counts.most_common()
-    top, n = ranked[0]
-    runner_up = ranked[1][1] if len(ranked) > 1 else 0
-    if n >= 2 and n >= 2 * max(runner_up, 1):
-        return top, f"unit codes ({n} {top} unit reference(s))"
-    return "", ""
+    top = counts.most_common(1)[0][1]
+    if top < 2:
+        return "", ""
+    # 60% of the leader keeps a genuine second subject (AI 3 vs Data 4) while
+    # rejecting an incidental one (Systems Admin 3 against Programming 6).
+    strong = [s for s, n in counts.most_common() if n >= 2 and n >= 0.6 * top]
+    detail = ", ".join(f"{s} x{counts[s]}" for s in strong)
+    return compose_stream(strong), f"unit codes ({detail})"
 
 
 def detect_stream(heading, rows):
-    """Identify the course stream one table belongs to.
+    """Identify which course one table belongs to.
 
-    Returns (stream, basis, also_matched) where `also_matched` lists any other
-    streams the heading mentioned, so an ambiguous heading is flagged rather
-    than quietly resolved one way.
+    Returns (course, basis). A table naming several subjects is ONE combined
+    course ("AI/Data"), not several - see compose_stream().
 
     Signals, strongest first:
-      1. the heading paragraph above the table (how the source labels streams),
+      1. the heading paragraph above the table (how the source labels courses),
       2. a title row inside the table,
       3. the unit codes being taught.
     """
     hits = _streams_in_text(heading)
     if hits:
-        return hits[0][0], f"heading: '{(heading or '').strip()[:60]}'", [s for s, _a in hits[1:]]
+        return compose_stream(hits), f"heading: '{(heading or '').strip()[:60]}'"
 
     for row in rows[:2]:                      # a merged title row above the header
         text = " ".join(" ".join(c) for c in row)
         hits = _streams_in_text(text)
         if hits and len(row) <= 2:            # a real title row, not the column headers
-            return hits[0][0], f"table title row: '{text.strip()[:60]}'", [s for s, _a in hits[1:]]
+            return compose_stream(hits), f"table title row: '{text.strip()[:60]}'"
 
-    stream, basis = _stream_from_units(rows)
-    return stream, basis, []
+    return _stream_from_units(rows)
 
 
 def resolve_class_defs(fname, tables, cfg):
@@ -520,7 +531,7 @@ def resolve_class_defs(fname, tables, cfg):
         return [dict(d) for d in cfg], issues
 
     detected = [detect_stream(heading, rows) for rows, heading in tables]
-    n_named = sum(1 for s, _b, _o in detected if s)
+    n_named = sum(1 for s, _b in detected if s)
 
     # 2. Not a stream document - keep the historical behaviour and say so.
     if len(tables) < 2 or n_named == 0:
@@ -542,7 +553,7 @@ def resolve_class_defs(fname, tables, cfg):
 
     doc_mode = file_mode(fname)
     defs, used = [], {}
-    for ti, ((rows, heading), (stream, basis, also)) in enumerate(zip(tables, detected)):
+    for ti, ((rows, heading), (stream, basis)) in enumerate(zip(tables, detected)):
         if stream:
             name = f"{base} {stream}".strip()
         elif cfg and ti < len(cfg):
@@ -550,10 +561,10 @@ def resolve_class_defs(fname, tables, cfg):
         else:
             name, basis = f"{base} Course {ti + 1}".strip(), "position in document"
             issues.append({"file": fname, "level": "WARN",
-                           "msg": f"Table {ti + 1} does not name a course stream in its "
-                                  f"heading ({heading.strip()[:60]!r}) and its units do not "
-                                  f"identify one; it was named '{name}'. Add the stream to "
-                                  f"the heading, or to STREAM_ALIASES, to name it properly."})
+                           "msg": f"Table {ti + 1} does not name a course in its heading "
+                                  f"({heading.strip()[:60]!r}) and its units do not identify "
+                                  f"one; it was named '{name}'. Add the subject to the "
+                                  f"heading, or to STREAM_ALIASES, to name it properly."})
 
         # Per-table delivery mode: the heading may override the filename.
         modes = norm_mode_token(heading) or ({doc_mode} if doc_mode else set())
@@ -570,17 +581,11 @@ def resolve_class_defs(fname, tables, cfg):
             name = f"{name} #{ti + 1}"
         used[name] = ti + 1
 
-        if also:
-            issues.append({"file": fname, "level": "WARN",
-                           "msg": f"Table {ti + 1} heading ({heading.strip()[:60]!r}) mentions "
-                                  f"more than one course stream ({stream}, {', '.join(also)}); "
-                                  f"used '{stream}'. Check the heading if that is wrong."})
-
         defs.append({"class": name[:80].strip(), "qual": qual, "delivery": mode,
                      "stream": stream, "stream_basis": basis})
 
     issues.append({"file": fname, "level": "INFO",
-                   "msg": f"Combined document: {len(defs)} course stream(s) detected - "
+                   "msg": f"Combined document: {len(defs)} course(s) detected - "
                           + "; ".join(f"{d['class']} (from {d['stream_basis']})" for d in defs)})
     return defs, issues
 

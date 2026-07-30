@@ -28,9 +28,10 @@ needs installing (pure Python standard library).
    Classes are **auto-detected** (one Word table = one class; multi-class docs like
    the combined Diploma split automatically); `CLASS_CONFIG` optionally supplies
    curated names for known files. Any new document works without configuration.
-   **Combined multi-course documents** (one table per course stream, each under a
-   heading naming it - e.g. ICT40120 Programming / AI / Data) are split into one
-   class per stream; add a stream by adding a line to `STREAM_ALIASES`.
+   **Combined multi-course documents** (one table per course, each under a heading
+   naming it - e.g. ICT40120 holds **Programming** and **AI/Data**) are split into
+   one class per course. A course covering two subjects stays ONE course
+   (`Cert IV AI/Data`). Add a subject with one line in `STREAM_ALIASES`.
    *Structural normalisation only - no co-teaching split, renaming, or FTE.*
 
 2. **Agent 2/3 - Consolidate & Extract** (`timetable_tool/agent2_extract.py`)
