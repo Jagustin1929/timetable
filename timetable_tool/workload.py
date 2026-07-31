@@ -25,6 +25,23 @@ TEACHER_FRACTIONS = {
     "Narelle Bell":    1.0,
 }
 
+# Visiting teachers. They deliver sessions and their hours are still counted and
+# shown, but they carry NO teaching load, so no fraction, expected hours,
+# percentage or on-track status applies to them.
+#
+# This is deliberately separate from "not in TEACHER_FRACTIONS": a teacher who is
+# simply missing from the table is a data gap and must be reported, whereas a
+# visiting teacher having no fraction is the correct answer. Conflating the two
+# would either nag about every visitor or hide a genuine omission.
+VISITING_TEACHERS = {
+    "Mark Kooper",
+}
+
+
+def is_visiting(teacher):
+    """True when the teacher carries no teaching load by design."""
+    return teacher in VISITING_TEACHERS
+
 # Unpaid break: a session longer than 4 hours has 30 minutes deducted, so a
 # 9:00-2:30 session counts as 5 teaching hours rather than 5.5.
 #
@@ -59,8 +76,21 @@ def apply_break(gross_hours):
 
 
 def fraction_for(teacher):
-    """Teaching-load fraction, or None if the teacher is not in the table."""
+    """Teaching-load fraction, or None if the teacher carries no load.
+
+    None covers two different cases; use is_visiting() to tell them apart. A
+    visiting teacher legitimately has no fraction; anyone else with None is a
+    missing entry that must be reported rather than silently treated as zero.
+    """
     return TEACHER_FRACTIONS.get(teacher)
+
+
+def load_label(teacher):
+    """What to show in the 'Load fraction' column when there is no fraction."""
+    frac = fraction_for(teacher)
+    if frac is not None:
+        return frac
+    return "visiting" if is_visiting(teacher) else ""
 
 
 def expected_hours(teacher):

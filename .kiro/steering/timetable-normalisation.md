@@ -22,7 +22,7 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 - **Every merge decision is recorded in the audit log**, and where a short/partial name could
   match **more than one** full name, the tool pauses/flags for confirmation rather than guessing.
 
-## Source files → classes (7 classes across 5 files)
+## Source files → classes
 
 | Source file                             | Class (own sheet)                              | Delivery |
 |-----------------------------------------|------------------------------------------------|----------|
@@ -30,7 +30,7 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
 | BSB50520 Diploma Library Services combined | Diploma Library Services — Face to Face     | F2F      |
 | BSB50520 Diploma Library Services combined | Diploma Library Services — Fulltime VOFF    | VOFF     |
 | BSB40720 Cert IV VOCF FTS2 2026         | Cert IV VOCF                                   | —        |
-| ICT40120 Cert IV Programming OUR        | Cert IV Programming                            | —        |
+| ICT40120 Cert IV ... (combined)         | Cert IV Programming **and** Cert IV AI/Data     | —       |
 | ICT30120 Cert III General VOF OUR       | Cert III General (online)                      | VOFF     |
 | ICT30120 Cert III General F2F OUR       | Cert III General (face-to-face)                | F2F      |
 
@@ -38,6 +38,42 @@ Project-specific rules for the teacher-timetable pipeline (Agent 1 Normaliser an
   PTE Evening → Diploma Face to Face → Diploma Fulltime VOFF.
 - The two **ICT30120** files are separate classes (not duplicates); a teacher may legitimately
   appear in both.
+
+## Combined multi-course documents
+
+- **The document decides how many classes it holds — never `CLASS_CONFIG`.** A combined
+  file gains and loses course streams over time; a config entry is a naming hint only.
+  Burying extra tables under one class name silently loses whole courses.
+- One qualification may be delivered as several parallel **courses**. These arrive either
+  as one file per course or as one combined file with **one table per course, under a
+  heading naming it**. **One Word table = one course**, always.
+- **A course may cover more than one subject.** ICT40120 is delivered as **two** courses,
+  `Programming` and `AI/Data` — *not three*. A table naming several subjects is ONE
+  combined course, so the subjects are joined (`Cert IV AI/Data`); never split into a
+  class per subject, and never treat it as an ambiguity to be resolved by picking one.
+- A joined name **MUST use a fixed canonical order** (the `STREAM_ALIASES` declaration
+  order), so `AI/Data`, `Data/AI`, `AI and Data` and `Data & AI` all give the same class.
+  Following the heading's word order instead would let a re-worded revision create a
+  second class and double-count the course.
+- A course **MUST produce the same class name whether it arrived standalone or combined**
+  (`Cert IV Programming` either way). Class names are therefore built as
+  `<qualification level> <subject(s)>` — the level from the filename (`Cert IV`) or the
+  AQF digit in the national code (`ICT40120` → 4 → `Cert IV`). If the names differ,
+  uploads cannot supersede by class identity and every session is counted twice.
+- Identification order: heading above the table → title row inside the table →
+  unit-code prefixes taught (`ICTPRG`→Programming, `ICTAII`→AI, `ICTDBS`/`ICTDAT`→Data).
+  Core units shared by every course (`ICTICT`, `BSBXCS`, `BSBCRT`) must never decide it.
+  A subject needs a real presence (≥2 references and ≥60% of the leader) before it joins
+  a name, so an incidental support unit cannot invent a subject.
+- **Adding a subject = one line in `STREAM_ALIASES`** (optionally its unit prefix in
+  `STREAM_UNIT_PREFIXES`). No other change should be needed.
+- Never silently merge two tables into one class: if two tables resolve to the same
+  name, keep them separate and `WARN`. If a table's course cannot be identified, name it
+  by position and `WARN` — do not fold it into a neighbouring class.
+- Match subject names on **word boundaries**, so `Date of Study` never reads as the Data
+  subject and `Website` never as Web.
+- Class names may contain `/`. Anything using a class name as an Excel sheet name must
+  sanitise it (`/` is illegal in sheet names) and respect the 31-character limit.
 
 ## Semester determination
 

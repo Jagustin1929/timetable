@@ -61,3 +61,32 @@ ADJUSTMENTS = [
 # "combined".
 MERGE_COMBINED_CERT3 = True
 COMBINED_LABEL = "Cert III General (F2F+VOFF combined)"
+
+
+# ---------------------------------------------------------------------------
+# Classes that are partly taught TOGETHER.
+#
+# Some courses share sessions: the ICT40120 Programming and AI/Data cohorts sit
+# in the same room for some units. The combined document lists that session in
+# BOTH tables, because each cohort's timetable has to show it - but physically it
+# is ONE session.
+#
+# Left unmerged it is counted twice, which both DOUBLES the teacher's hours for
+# that slot and reports a clash against themselves.
+#
+# The test is deliberately strict, because merging two genuinely separate
+# sessions would hide a real double-booking. All of these must match:
+#     same teacher, same day, same start AND end time, same session type,
+#     exactly the same unit codes, and overlapping weeks.
+# Same time but different units is a real clash and stays a clash.
+#
+# Weeks are unioned, so a slot taught to one cohort for part of the semester and
+# to both for the rest still yields the right number of teaching weeks.
+# Every merge is written to the audit sheet.
+# ---------------------------------------------------------------------------
+MERGE_COMBINED_CLASS_GROUPS = [
+    {
+        "classes": ["Cert IV Programming", "Cert IV AI/Data"],
+        "label": "Cert IV Programming + AI/Data (combined)",
+    },
+]

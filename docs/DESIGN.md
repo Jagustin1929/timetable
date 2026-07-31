@@ -96,9 +96,26 @@ fragile document-parsing logic isolated from the business logic.
 - **Line-break fidelity:** text is extracted **preserving `<w:br>`/`<w:cr>` and
   paragraph boundaries**, so multiple units and multiple teachers packed into one
   cell split correctly (e.g. `Shaun StummerShanna Roper` → two names).
-- **Class detection:** driven by a `CLASS_CONFIG` mapping filename → class(es).
-  One Word **table = one class**; the combined Diploma yields 3 classes in table
-  order (PTE Evening → Face to Face → Fulltime VOFF).
+- **Class detection:** one Word **table = one class**. The **document** decides how
+  many classes it holds; `CLASS_CONFIG` only supplies curated names. The combined
+  Diploma yields 3 cohort classes in table order (PTE Evening → Face to Face →
+  Fulltime VOFF).
+- **Combined multi-course documents:** where the tables are separate *courses* of one
+  qualification, each is named from the heading above it and prefixed with the
+  qualification level, so a course is called the same thing whether it arrives
+  standalone or combined (`ICT40120 ... Programming OUR.docx` and the Programming
+  table of the combined file both give **Cert IV Programming**). That identity is
+  what lets an upload supersede the older file instead of double-counting it.
+  Fallbacks if a heading is missing: a table title row, then the unit-code
+  prefixes actually taught (`ICTPRG` → Programming, `ICTAII` → AI, `ICTDBS`/
+  `ICTDAT` → Data). A table that still cannot be identified is named by position
+  and raises a `WARN` rather than being merged into another class.
+- **One course may cover several subjects.** ICT40120 is delivered as **two** courses,
+  Programming and **AI/Data** — not three. A table naming more than one subject is a
+  single combined course and the subjects are joined (`Cert IV AI/Data`). The joined
+  name uses a fixed canonical order, so `AI/Data`, `Data/AI`, `AI and Data` and
+  `Data & AI` all yield the same class and a re-worded heading in the next revision
+  cannot silently create a second class.
 - **Merged-cell carry-forward:** blank Day/Time cells inherit the value above
   (Word vertical merges), reconstructing the intended grid.
 - **Per-row normalisation:** day + semester/year, start/end time, unit codes+names,

@@ -28,6 +28,10 @@ needs installing (pure Python standard library).
    Classes are **auto-detected** (one Word table = one class; multi-class docs like
    the combined Diploma split automatically); `CLASS_CONFIG` optionally supplies
    curated names for known files. Any new document works without configuration.
+   **Combined multi-course documents** (one table per course, each under a heading
+   naming it - e.g. ICT40120 holds **Programming** and **AI/Data**) are split into
+   one class per course. A course covering two subjects stays ONE course
+   (`Cert IV AI/Data`). Add a subject with one line in `STREAM_ALIASES`.
    *Structural normalisation only - no co-teaching split, renaming, or FTE.*
 
 2. **Agent 2/3 - Consolidate & Extract** (`timetable_tool/agent2_extract.py`)
@@ -166,9 +170,31 @@ See `.kiro/steering/timetable-normalisation.md`:
 ## Layout
 
 ```
-source_docs/     the 5 input Word documents (7 classes)
+source_docs/     reference copy of the input Word documents - never written to
 timetable_tool/  the pipeline scripts (incl. webapp.py - the GUI)
-output/          generated CSV/XLSX
 prototype/       clickable HTML wireframe
-webapp_data/     scratch area used by the web app (ignored by git)
+output/          results from the COMMAND LINE      (generated, not in git)
+webapp_data/     uploads + results from the WEB APP (generated, not in git)
 ```
+
+## Where to find your results
+
+This catches people out, so it is worth being explicit:
+
+| How you ran it | Uploads read from | Results written to |
+|---|---|---|
+| **Web app** (`webapp.py`) | `webapp_data/source_docs/` | `webapp_data/output/` |
+| **Command line** | whatever folder you pass | `--out` folder (default `output/`) |
+
+**Neither folder is committed to git**, deliberately. A checked-in `output/` looks
+authoritative but goes stale the moment the source documents change, and reading it by
+mistake means debugging data that has nothing to do with your upload.
+
+The repository's `source_docs/` is a **reference copy only** - the web app never writes
+to it, so its contents may be older than the files you have uploaded.
+
+> **Opening `normalised_master.csv` in Excel:** the *Week of Study* column (`1-11`,
+> `12-18`, `1-18`) is auto-converted to dates on open (`1-Nov`, `Dec-18`, `Jan-18`).
+> That is Excel display only - but **do not save the file back**, or the mangled values
+> are written in and every hours figure silently breaks, since weeks drive the totals.
+> Open `normalised.xlsx` instead, or import the CSV with that column set to **Text**.
