@@ -2,4 +2,9 @@ __pycache__/
 *.pyc
 .DS_Store
 ~$*.docx
+
+# Generated results are never committed. A checked-in output/ folder looks
+# authoritative and goes stale the moment the source documents change - it was
+# previously mistaken for a live build and sent someone debugging the wrong data.
 webapp_data/
+output/
