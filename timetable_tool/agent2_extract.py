@@ -22,8 +22,10 @@ import sys, os, re, csv, argparse
 from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from xlsx_util import write_workbook
-from adjustments import ADJUSTMENTS, MERGE_COMBINED_CERT3, COMBINED_LABEL
+from adjustments import (ADJUSTMENTS, MERGE_COMBINED_CERT3, COMBINED_LABEL,
+                         MERGE_COMBINED_CLASS_GROUPS)
 from workload import (apply_break, fraction_for, expected_hours, load_percent,
+                      is_visiting, load_label,
                       status_for, FULLTIME_SEMESTER_HOURS, BREAK_DEDUCTION_HOURS,
                       ON_TRACK_MIN_PCT, ON_TRACK_MAX_PCT)
 
@@ -324,6 +326,38 @@ def main():
                     by_key[key] = s
         sessions = [s for s in sessions if id(s) not in drop]
 
+    # ---- merge sessions that two classes are taught TOGETHER in ----------------
+    # One physical session listed in both cohorts' tables. Counted once, or the
+    # teacher's hours double and they clash against themselves. Strict match:
+    # same teacher/day/time/session type/unit codes AND overlapping weeks.
+    for group in MERGE_COMBINED_CLASS_GROUPS:
+        members = set(group["classes"])
+        by_key, drop = {}, []
+        for s in sessions:
+            if s["class"] not in members:
+                continue
+            key = (s["teacher"], s["day"], s["t_start"], s["t_end"], s["session_type"],
+                   frozenset(UNIT_CODE_RE.findall(s["units"])))
+            prev = by_key.get(key)
+            if prev is None:
+                by_key[key] = s
+                continue
+            if not (prev["wkset"] & s["wkset"]):
+                continue            # different weeks -> separate deliveries, keep both
+            merged_from = sorted({prev["class"], s["class"]})
+            prev["class"] = group["label"]
+            prev["wkset"] |= s["wkset"]
+            prev["wkcount"] = len(prev["wkset"])
+            prev["coteachers"] = sorted(set(prev["coteachers"]) | set(s["coteachers"]))
+            drop.append(id(s))
+            audit.append(["COMBINED-MERGE",
+                          f"{s['teacher']} {s['day']} {s['time']} "
+                          f"({', '.join(sorted(frozenset(UNIT_CODE_RE.findall(s['units'])))) or 'no unit code'}): "
+                          f"taught together for {' + '.join(merged_from)}; merged into one "
+                          f"session ({group['label']}), counted once over weeks "
+                          f"{weeks_label(prev['wkset'])}."])
+        sessions = [s for s in sessions if id(s) not in drop]
+
     teachers = sorted({s["teacher"] for s in sessions})
 
     # ---- per-teacher sheets + clash detection ----
@@ -368,7 +402,7 @@ def main():
                       "Weekly contact hrs", "Semester contact hrs",
                       "Load fraction", "Expected hrs", "% of load", "Status", "Classes"]
     summary_rows = []
-    no_fraction = []
+    no_fraction, visiting = [], []
     for t in teachers:
         mine = [s for s in sessions if s["teacher"] == t]
         classes = sorted({s["class"] for s in mine})
@@ -377,20 +411,30 @@ def main():
         actual = per_hours[t]
         frac, exp = fraction_for(t), expected_hours(t)
         pct = load_percent(t, actual)
+        # A visiting teacher carries no load by design, so no fraction is the
+        # right answer for them - only a teacher genuinely missing from the
+        # table is a data gap worth reporting.
         if frac is None:
-            no_fraction.append(t)
+            (visiting if is_visiting(t) else no_fraction).append(t)
         summary_rows.append([t, len(mine), len(classes), len(units),
                              weekly, actual,
-                             frac if frac is not None else "",
+                             load_label(t),
                              exp if exp is not None else "",
                              pct if pct is not None else "",
                              status_for(pct), "; ".join(classes)])
 
+    if visiting:
+        audit.append(["WORKLOAD-VISITING",
+                      "Visiting teacher(s), no teaching load applies: "
+                      + ", ".join(sorted(visiting))
+                      + ". Their sessions and hours are counted and shown, but no "
+                        "expected hours, percentage or status is calculated."])
     if no_fraction:
         audit.append(["WORKLOAD-NO-FRACTION",
                       "No teaching-load fraction defined for: " + ", ".join(no_fraction)
                       + ". Expected hours and status cannot be calculated. Add them to "
-                        "timetable_tool/workload.py."])
+                        "timetable_tool/workload.py, or to VISITING_TEACHERS if they "
+                        "carry no load."])
     off_track = [(r[0], r[8], r[9]) for r in summary_rows if r[9] in ("UNDER", "OVER")]
     if off_track:
         audit.append(["WORKLOAD-OFF-TRACK",
@@ -457,12 +501,20 @@ def main():
     print(f"\nWorkload summary  (full load = {FULLTIME_SEMESTER_HOURS:g} hrs/semester; "
           f"ON TRACK = {ON_TRACK_MIN_PCT:g}-{ON_TRACK_MAX_PCT:g}%)")
     print(f"  {'Teacher':16}{'sess':>5}{'wk hrs':>8}{'sem hrs':>9}"
-          f"{'frac':>6}{'expect':>8}{'%load':>7}  status")
+          f"{'frac':>9}{'expect':>8}{'%load':>7}  status")
+    def _num(v):
+        """Format a numeric cell, passing text through unchanged.
+
+        The load column carries "visiting" for a teacher who carries no load, so
+        it cannot be assumed numeric.
+        """
+        if v == "" or v is None:
+            return "-"
+        return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+
     for r in summary_rows:
-        frac = f"{r[6]:g}" if r[6] != "" else "-"
-        exp = f"{r[7]:g}" if r[7] != "" else "-"
-        pct = f"{r[8]:g}" if r[8] != "" else "-"
-        print(f"  {r[0]:16}{r[1]:>5}{r[4]:>8}{r[5]:>9}{frac:>6}{exp:>8}{pct:>7}  {r[9]}")
+        frac, exp, pct = _num(r[6]), _num(r[7]), _num(r[8])
+        print(f"  {r[0]:16}{r[1]:>5}{r[4]:>8}{r[5]:>9}{frac:>9}{exp:>8}{pct:>7}  {r[9]}")
     print(f"\nCLASHES remaining: {len(clashes)}")
     for c in clashes:
         print("   -", c)
