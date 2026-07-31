@@ -49,8 +49,17 @@ CLASS_CONFIG = [
         {"class": "Diploma Library Services - Fulltime VOFF",   "qual": "BSB50520", "delivery": "VOFF"},
     ]),
     (["bsb40720"],            [{"class": "Cert IV VOCF",                "qual": "BSB40720", "delivery": ""}]),
-    (["ict40120"],            [{"class": "Cert IV Programming",         "qual": "ICT40120", "delivery": "",
-                                "stream": "Programming"}]),
+
+    # ICT40120 is a COMBINED file: one table per course, listed in table order.
+    # Programming is table 1, AI/Data is table 2. AI/Data is ONE course, not two.
+    # These names are pinned so they are correct however the headings are worded;
+    # add another line here in its table position when a course is added, or
+    # remove them entirely to have the headings name the courses instead.
+    (["ict40120"], [
+        {"class": "Cert IV Programming", "qual": "ICT40120", "delivery": "", "stream": "Programming"},
+        {"class": "Cert IV AI/Data",     "qual": "ICT40120", "delivery": "", "stream": "AI/Data"},
+    ]),
+
     (["ict30120", "vof"],     [{"class": "Cert III General (VOFF)",     "qual": "ICT30120", "delivery": "VOFF"}]),
     (["ict30120", "f2f"],     [{"class": "Cert III General (F2F)",      "qual": "ICT30120", "delivery": "F2F"}]),
 ]
@@ -533,7 +542,23 @@ def resolve_class_defs(fname, tables, cfg):
     detected = [detect_stream(heading, rows) for rows, heading in tables]
     n_named = sum(1 for s, _b in detected if s)
 
-    # 2. Not a stream document - keep the historical behaviour and say so.
+    # 2. FEWER tables than the config lists - one course of a combined file
+    #    arriving on its own (the standalone "... Programming OUR.docx"), or a
+    #    course withdrawn from the document. Keep the curated names, matched on
+    #    the course DETECTED IN THE TABLE rather than its position, so the
+    #    Programming file stays "Cert IV Programming" and an AI/Data file on its
+    #    own stays "Cert IV AI/Data" instead of inheriting the first name.
+    if cfg and len(tables) < len(cfg):
+        defs = []
+        for ti, (stream, basis) in enumerate(detected):
+            match = next((d for d in cfg if stream and d.get("stream") == stream), None)
+            defs.append(dict(match or cfg[min(ti, len(cfg) - 1)]))
+        issues.append({"file": fname, "level": "INFO",
+                       "msg": f"Document holds {len(tables)} of the {len(cfg)} configured "
+                              f"course(s): " + "; ".join(d["class"] for d in defs)})
+        return defs, issues
+
+    # 3. Not a multi-course document - keep the historical behaviour and say so.
     if len(tables) < 2 or n_named == 0:
         if cfg:
             issues.append({"file": fname, "level": "WARN",
@@ -543,8 +568,8 @@ def resolve_class_defs(fname, tables, cfg):
                                   f"auto-detected class names - check the document structure."})
         return auto_class_defs(fname, tables), issues
 
-    # 3. A combined, multi-stream document. Prefix every class with the
-    #    qualification level so a stream is named identically wherever it lives.
+    # 4. A combined, multi-course document. Prefix every class with the
+    #    qualification level so a course is named identically wherever it lives.
     base = ""
     if cfg and cfg[0].get("stream") and cfg[0].get("class"):
         base = re.sub(r"\b" + re.escape(cfg[0]["stream"]) + r"\b", "",
